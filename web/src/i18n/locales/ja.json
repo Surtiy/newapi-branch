@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Main site": "メインサイト",
+    "Main site API key": "メインサイトの API キー",
+    "Configured; enter a new key to replace": "設定済み。変更するには新しいキーを入力",
+    "Enter your main site API key": "メインサイトの API キーを入力",
+    "Save API key": "API キーを保存",
+    "Main site API key saved": "メインサイトの API キーを保存しました",
+    "Main site API key is configured. Stored keys are never displayed.": "API キーは設定済みです。保存済みのキーは表示されません。",
+    "Save a main site API key to start syncing models.": "メインサイトの API キーを保存してモデルの同期を開始してください。",
+    "Ask an administrator with sensitive channel permissions to configure the API key.": "チャンネルの機密設定権限を持つ管理者に API キーの設定を依頼してください。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Main site": "Site principal",
+    "Main site API key": "Clé API du site principal",
+    "Configured; enter a new key to replace": "Configurée ; saisir une nouvelle clé pour la remplacer",
+    "Enter your main site API key": "Saisissez votre clé API du site principal",
+    "Save API key": "Enregistrer la clé API",
+    "Main site API key saved": "Clé API du site principal enregistrée",
+    "Main site API key is configured. Stored keys are never displayed.": "La clé API est configurée. Les clés enregistrées ne sont jamais affichées.",
+    "Save a main site API key to start syncing models.": "Enregistrez une clé API du site principal pour synchroniser les modèles.",
+    "Ask an administrator with sensitive channel permissions to configure the API key.": "Demandez à un administrateur autorisé à modifier les données sensibles des canaux de configurer la clé API.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

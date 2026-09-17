@@ -11,7 +11,74 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+	"gorm.io/gorm/logger"
 )
+
+// BranchMainURL is fixed so catalog credentials cannot be sent to another host.
+const BranchMainURL = "https://aicost.me"
+
+// SaveBranchCatalogKey preserves routing and rotates derived channels that still
+// use the parent's credential. Writes commit together without logging SQL secrets.
+func SaveBranchCatalogKey(channelID int, key string) (int, error) {
+	var id int
+	err := DB.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)}).Transaction(func(tx *gorm.DB) error {
+		// Serialize first-time setup across instances as well as repeated saves.
+		guard := Option{Key: "BranchCatalogConfigLock", Value: ""}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&guard).Error; err != nil {
+			return err
+		}
+		if err := lockForUpdate(tx).Where(commonKeyCol+" = ?", guard.Key).First(&guard).Error; err != nil {
+			return err
+		}
+		var channel Channel
+		query := lockForUpdate(tx).Where("base_url IN ? AND type = ?", []string{BranchMainURL, BranchMainURL + "/"}, 1).
+			Where("tag IS NULL OR tag NOT LIKE ?", "branch-group-%")
+		if channelID > 0 {
+			query = query.Where("id = ?", channelID)
+		}
+		var candidates []Channel
+		if err := query.Order("id ASC").Find(&candidates).Error; err != nil {
+			return err
+		}
+		for _, candidate := range candidates {
+			if !candidate.ChannelInfo.IsMultiKey {
+				channel = candidate
+				break
+			}
+		}
+		if channel.Id == 0 && channelID == 0 {
+			base := BranchMainURL
+			channel = Channel{Name: "AICost", Type: 1, Status: 1, Key: key, BaseURL: &base, Group: "default", CreatedTime: common.GetTimestamp()}
+			if err := tx.Create(&channel).Error; err != nil {
+				return err
+			}
+			id = channel.Id
+			return nil
+		}
+		if channel.Id == 0 {
+			return errors.New("请选择使用单个令牌的主站渠道")
+		}
+		id = channel.Id
+		var children []Channel
+		if err := lockForUpdate(tx).Where("tag = ? OR tag LIKE ?", fmt.Sprintf("branch-video-%d", id), fmt.Sprintf("branch-group-%d-%%", id)).Find(&children).Error; err != nil {
+			return err
+		}
+		for _, child := range children {
+			if child.Key != channel.Key || strings.TrimRight(child.GetBaseURL(), "/") != BranchMainURL || child.ChannelInfo.IsMultiKey {
+				continue
+			}
+			if child.Type != 1 && (child.Type != constant.ChannelTypeTaskPlugin || child.GetSetting().TaskPluginKey != "aicost-branch") {
+				continue
+			}
+			if err := tx.Model(&Channel{}).Where("id = ?", child.Id).Update("key", key).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Model(&Channel{}).Where("id = ?", id).Update("key", key).Error
+	})
+	return id, err
+}
 
 type BranchModelImport struct {
 	Change      ModelPricingChange

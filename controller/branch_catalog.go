@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -12,10 +13,11 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/gin-gonic/gin"
 )
 
-const branchMainURL = "https://aicost.me"
+const branchMainURL = model.BranchMainURL
 
 type branchCatalogItem struct {
 	model.Pricing
@@ -63,15 +65,54 @@ func branchItemGroups(item branchCatalogItem, catalog *branchCatalog) map[string
 
 func GetBranchCatalogChannels(c *gin.Context) {
 	var channels []model.Channel
-	if err := model.DB.Select("id", "name", "base_url", "status").Where("base_url IN ? AND type = ?", []string{branchMainURL, branchMainURL + "/"}, 1).Where("tag IS NULL OR tag NOT LIKE ?", "branch-group-%").Find(&channels).Error; err != nil {
+	if err := model.DB.Select("id", "name", "base_url", "status", "key", "channel_info").Where("base_url IN ? AND type = ?", []string{branchMainURL, branchMainURL + "/"}, 1).Where("tag IS NULL OR tag NOT LIKE ?", "branch-group-%").Order("id ASC").Find(&channels).Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	result := make([]gin.H, 0, len(channels))
 	for _, channel := range channels {
-		result = append(result, gin.H{"id": channel.Id, "name": channel.Name, "status": channel.Status})
+		if channel.ChannelInfo.IsMultiKey {
+			continue
+		}
+		result = append(result, gin.H{"id": channel.Id, "name": channel.Name, "status": channel.Status, "configured": strings.TrimSpace(channel.Key) != ""})
 	}
-	common.ApiSuccess(c, gin.H{"main_url": branchMainURL, "channels": result})
+	common.ApiSuccess(c, gin.H{"main_url": branchMainURL, "channels": result, "can_configure": authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite)})
+}
+
+// ConfigureBranchCatalog never returns or audits the submitted credential.
+func ConfigureBranchCatalog(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	if !authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "需要渠道敏感配置权限才能保存主站 API Key"})
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8192)
+	var request struct {
+		ChannelID int    `json:"channel_id"`
+		APIKey    string `json:"api_key"`
+	}
+	if c.ShouldBindJSON(&request) != nil || request.ChannelID < 0 {
+		common.ApiErrorMsg(c, "主站 API Key 参数无效")
+		return
+	}
+	key := strings.TrimSpace(request.APIKey)
+	if len(key) == 0 || len(key) > 4096 || strings.ContainsAny(key, " \t\r\n,\"[]") {
+		common.ApiErrorMsg(c, "请输入单个有效的主站 API Key，不要添加 Bearer 前缀")
+		return
+	}
+	// Validate the fixed HTTPS catalog before changing working credentials.
+	if _, err := requestBranchCatalog(c.Request.Context(), key); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	id, err := model.SaveBranchCatalogKey(request.ChannelID, key)
+	if err != nil {
+		common.ApiErrorMsg(c, "保存主站 API Key 失败，请刷新后检查渠道配置")
+		return
+	}
+	model.InitChannelCache()
+	recordManageAudit(c, "branch.catalog.configure", map[string]any{"channel_id": id})
+	common.ApiSuccess(c, gin.H{"channel_id": id})
 }
 
 func fetchBranchCatalog(c *gin.Context, channelID int) (*model.Channel, *branchCatalog, error) {
@@ -82,28 +123,33 @@ func fetchBranchCatalog(c *gin.Context, channelID int) (*model.Channel, *branchC
 	if strings.TrimRight(channel.GetBaseURL(), "/") != branchMainURL || channel.ChannelInfo.IsMultiKey || channel.Type != 1 || (channel.Tag != nil && strings.HasPrefix(*channel.Tag, "branch-group-")) {
 		return nil, nil, errors.New("请选择使用单个令牌的 AICost 主站渠道")
 	}
-	request, err := http.NewRequestWithContext(c.Request.Context(), http.MethodGet, branchMainURL+"/api/distributor/models", nil)
+	catalog, err := requestBranchCatalog(c.Request.Context(), channel.Key)
+	return channel, catalog, err
+}
+
+func requestBranchCatalog(ctx context.Context, key string) (*branchCatalog, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, branchMainURL+"/api/distributor/models", nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	request.Header.Set("Authorization", "Bearer "+channel.Key)
+	request.Header.Set("Authorization", "Bearer "+key)
 	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, nil, errors.New("连接主站失败，请稍后重试")
+		return nil, errors.New("连接主站失败，请稍后重试")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("主站接口返回 HTTP %d，请检查主站令牌权限", response.StatusCode)
+		return nil, fmt.Errorf("主站接口返回 HTTP %d，请检查主站令牌权限", response.StatusCode)
 	}
 	var envelope struct {
 		Success bool          `json:"success"`
 		Data    branchCatalog `json:"data"`
 	}
 	if err := common.DecodeJson(io.LimitReader(response.Body, 16<<20), &envelope); err != nil || !envelope.Success || envelope.Data.Version == "" {
-		return nil, nil, errors.New("主站目录格式无效")
+		return nil, errors.New("主站目录格式无效")
 	}
-	return channel, &envelope.Data, nil
+	return &envelope.Data, nil
 }
 
 func branchPricing(item branchCatalogItem) (model.PricingValues, error) {

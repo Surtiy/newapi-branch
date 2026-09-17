@@ -1,10 +1,12 @@
 package model
 
 import (
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/stretchr/testify/require"
@@ -12,6 +14,65 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+func TestBranchCatalogKeySetupAndRotation(t *testing.T) {
+	setupBranchTestDB(t)
+	// This test runs against disposable databases in all three dialects.
+	require.NoError(t, DB.Where("base_url IN ?", []string{BranchMainURL, BranchMainURL + "/"}).Delete(&Channel{}).Error)
+	t.Cleanup(func() { DB.Where("base_url IN ?", []string{BranchMainURL, BranchMainURL + "/"}).Delete(&Channel{}) })
+	base := BranchMainURL
+	multi := Channel{Name: "legacy multi", Type: 1, Key: "multi-only", BaseURL: &base, ChannelInfo: ChannelInfo{IsMultiKey: true}}
+	require.NoError(t, DB.Create(&multi).Error)
+	id, err := SaveBranchCatalogKey(0, "test-original-key")
+	require.NoError(t, err)
+	require.NotEqual(t, multi.Id, id)
+	var parent Channel
+	require.NoError(t, DB.First(&parent, id).Error)
+	require.Equal(t, BranchMainURL, parent.GetBaseURL())
+	require.Empty(t, parent.Models)
+	parent.Models = "keep-local"
+	parent.Group = "custom"
+	require.NoError(t, DB.Save(&parent).Error)
+	before := common.OptionMap["ModelPrice"]
+	for _, item := range []struct {
+		suffix, key string
+		kind        int
+	}{
+		{"text", "test-original-key", 1},
+		{"video", "test-original-key", constant.ChannelTypeTaskPlugin},
+		{"override", "independent-key", 1},
+	} {
+		tag := fmt.Sprintf("branch-group-%d-%s", id, item.suffix)
+		setting := `{"task_plugin_key":"aicost-branch"}`
+		child := Channel{Name: item.suffix, Type: item.kind, Key: item.key, BaseURL: &base, Tag: &tag, Setting: &setting, Models: "keep-child", Group: "custom", Status: 2}
+		require.NoError(t, DB.Create(&child).Error)
+	}
+	rotated, err := SaveBranchCatalogKey(0, "test-new-key")
+	require.NoError(t, err)
+	require.Equal(t, id, rotated, "repeated setup must reuse the compatible channel")
+	require.NoError(t, DB.First(&parent, id).Error)
+	require.Equal(t, "test-new-key", parent.Key)
+	require.Equal(t, "keep-local", parent.Models)
+	require.Equal(t, "custom", parent.Group)
+	var children []Channel
+	require.NoError(t, DB.Where("tag LIKE ?", fmt.Sprintf("branch-group-%d-%%", id)).Find(&children).Error)
+	require.Len(t, children, 3)
+	for _, child := range children {
+		if child.Name == "override" {
+			require.Equal(t, "independent-key", child.Key)
+		} else {
+			require.Equal(t, "test-new-key", child.Key)
+		}
+		require.Equal(t, "keep-child", child.Models)
+		require.Equal(t, "custom", child.Group)
+		require.Equal(t, 2, child.Status)
+	}
+	require.Equal(t, before, common.OptionMap["ModelPrice"])
+	_, err = SaveBranchCatalogKey(multi.Id, "rejected")
+	require.Error(t, err)
+	require.NoError(t, DB.First(&multi, multi.Id).Error)
+	require.Equal(t, "multi-only", multi.Key)
+}
 
 func setupBranchTestDB(t *testing.T) {
 	original := DB

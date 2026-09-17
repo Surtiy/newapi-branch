@@ -1,10 +1,82 @@
 package controller
 
 import (
+	"context"
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
+
+type branchCatalogTransport func(*http.Request) (*http.Response, error)
+
+func (f branchCatalogTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestBranchCatalogKeyConfiguration(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Log{}))
+	originalTransport := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+	http.DefaultTransport = branchCatalogTransport(func(r *http.Request) (*http.Response, error) {
+		require.Equal(t, "https://aicost.me/api/distributor/models", r.URL.String())
+		status := http.StatusOK
+		if r.Header.Get("Authorization") != "Bearer test-valid-key" {
+			status = http.StatusUnauthorized
+		}
+		return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"success":true,"data":{"catalog_version":"v1","models":[]}}`)), Request: r}, nil
+	})
+	call := func(body string, role int) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Set("id", 1)
+		c.Set("role", role)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/option/branch_catalog/config", strings.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		ConfigureBranchCatalog(c)
+		return w
+	}
+	w := call(`{"api_key":"test-valid-key"}`, common.RoleRootUser)
+	require.Contains(t, w.Body.String(), `"success":true`)
+	require.NotContains(t, w.Body.String(), "test-valid-key")
+	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	var parent model.Channel
+	require.NoError(t, db.First(&parent).Error)
+	require.Equal(t, "test-valid-key", parent.Key)
+	oldVersion := branchChannelVersion(&parent)
+	for _, body := range []string{`{"api_key":"test-rejected-key"}`, `{"api_key":"Bearer test-valid-key"}`, `{"api_key":""}`} {
+		w = call(body, common.RoleRootUser)
+		require.Contains(t, w.Body.String(), `"success":false`)
+		require.NoError(t, db.First(&parent).Error)
+		require.Equal(t, "test-valid-key", parent.Key)
+	}
+	w = call(`{"api_key":"test-valid-key"}`, common.RoleCommonUser)
+	require.Equal(t, http.StatusForbidden, w.Code)
+	w = httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Set("role", common.RoleRootUser)
+	GetBranchCatalogChannels(c)
+	require.Contains(t, w.Body.String(), `"configured":true`)
+	require.NotContains(t, w.Body.String(), "test-valid-key")
+	parent.Key = "replacement"
+	require.NotEqual(t, oldVersion, branchChannelVersion(&parent))
+}
+
+func TestBranchCatalogDoesNotFollowRedirectsOrExposeUpstreamErrors(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	http.DefaultTransport = branchCatalogTransport(func(r *http.Request) (*http.Response, error) {
+		require.Equal(t, "aicost.me", r.URL.Host)
+		return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": {"https://other.example/catalog"}}, Body: io.NopCloser(strings.NewReader("upstream-secret")), Request: r}, nil
+	})
+	_, err := requestBranchCatalog(context.Background(), "test-secret")
+	require.ErrorContains(t, err, "302")
+	require.NotContains(t, err.Error(), "secret")
+}
 
 func TestBranchCatalogPreservesCacheAndPricingModes(t *testing.T) {
 	zero := 0.0

@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Main site": "Trang chính",
+    "Main site API key": "Khóa API trang chính",
+    "Configured; enter a new key to replace": "Đã cấu hình; nhập khóa mới để thay thế",
+    "Enter your main site API key": "Nhập khóa API trang chính",
+    "Save API key": "Lưu khóa API",
+    "Main site API key saved": "Đã lưu khóa API trang chính",
+    "Main site API key is configured. Stored keys are never displayed.": "Đã cấu hình khóa API. Khóa đã lưu không được hiển thị.",
+    "Save a main site API key to start syncing models.": "Lưu khóa API trang chính để bắt đầu đồng bộ mô hình.",
+    "Ask an administrator with sensitive channel permissions to configure the API key.": "Nhờ quản trị viên có quyền cấu hình thông tin nhạy cảm của kênh thiết lập khóa API.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

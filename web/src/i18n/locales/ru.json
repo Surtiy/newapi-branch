@@ -1,5 +1,14 @@
 {
   "translation": {
+    "Main site": "Основной сайт",
+    "Main site API key": "API-ключ основного сайта",
+    "Configured; enter a new key to replace": "Настроен; введите новый ключ для замены",
+    "Enter your main site API key": "Введите API-ключ основного сайта",
+    "Save API key": "Сохранить API-ключ",
+    "Main site API key saved": "API-ключ основного сайта сохранён",
+    "Main site API key is configured. Stored keys are never displayed.": "API-ключ настроен. Сохранённые ключи не отображаются.",
+    "Save a main site API key to start syncing models.": "Сохраните API-ключ основного сайта для синхронизации моделей.",
+    "Ask an administrator with sensitive channel permissions to configure the API key.": "Попросите администратора с правом изменения конфиденциальных настроек каналов настроить API-ключ.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",
