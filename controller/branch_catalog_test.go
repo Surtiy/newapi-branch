@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -81,16 +82,43 @@ func TestBranchCatalogDoesNotFollowRedirectsOrExposeUpstreamErrors(t *testing.T)
 func TestBranchCatalogPreservesCacheAndPricingModes(t *testing.T) {
 	zero := 0.0
 	write := 1.25
-	values, err := branchPricing(branchCatalogItem{Pricing: model.Pricing{ModelName: "branch-language", QuotaType: 0, ModelRatio: 5, CompletionRatio: 3, CacheRatio: &zero, CreateCacheRatio: &write}, ModelType: "language"})
+	values, err := branchPricing(branchCatalogItem{Pricing: model.Pricing{ModelName: "branch-language", QuotaType: 0, ModelRatio: 5, CompletionRatio: 3, CacheRatio: &zero, CreateCacheRatio: &write}, ModelType: "language"}, 1)
 	require.NoError(t, err)
 	require.Equal(t, 0.0, values["CacheRatio"])
 	require.Equal(t, 1.25, values["CreateCacheRatio"])
-	values, err = branchPricing(branchCatalogItem{Pricing: model.Pricing{ModelName: "branch-image", QuotaType: 1, ModelPrice: 0}, ModelType: "image"})
+	values, err = branchPricing(branchCatalogItem{Pricing: model.Pricing{ModelName: "branch-image", QuotaType: 1, ModelPrice: 0}, ModelType: "image"}, 1)
 	require.NoError(t, err)
 	require.Equal(t, 0.0, values["ModelPrice"])
 	require.NotContains(t, values, "ModelRatio")
-	_, err = branchPricing(branchCatalogItem{ModelType: "video"})
+	_, err = branchPricing(branchCatalogItem{ModelType: "video"}, 1)
 	require.Error(t, err)
+}
+
+func TestBranchPricingAppliesUniformPriceMultiplier(t *testing.T) {
+	language, err := branchPricing(branchCatalogItem{Pricing: model.Pricing{ModelName: "language", QuotaType: 0, ModelRatio: 2, CompletionRatio: 4}, ModelType: "language"}, 1.5)
+	require.NoError(t, err)
+	require.Equal(t, 3.0, language["ModelRatio"])
+	require.Equal(t, 4.0, language["CompletionRatio"], "relative output multiplier must not be applied twice")
+
+	image, err := branchPricing(branchCatalogItem{Pricing: model.Pricing{ModelName: "image", QuotaType: 1, ModelPrice: 0.2}, ModelType: "image"}, 1.5)
+	require.NoError(t, err)
+	require.InDelta(t, 0.3, image["ModelPrice"], 1e-12)
+
+	video, err := branchPricing(branchCatalogItem{Pricing: model.Pricing{ModelName: "video", ModelPrice: 0.4}, ModelType: "video", VideoBillingUnit: "second"}, 1.5)
+	require.NoError(t, err)
+	require.Equal(t, `tier("second", u("seconds") * 0.6)`, video["billing_setting.billing_expr"])
+
+	expression, err := branchPricing(branchCatalogItem{Pricing: model.Pricing{ModelName: "expression", BillingMode: "tiered_expr", BillingExpr: `tier("base", p * 2 + c * 8)`}, ModelType: "language"}, 1.5)
+	require.NoError(t, err)
+	require.Equal(t, `(tier("base", p * 2 + c * 8)) * 1.5`, expression["billing_setting.billing_expr"])
+	versioned, err := branchPricing(branchCatalogItem{Pricing: model.Pricing{ModelName: "versioned", BillingMode: "tiered_expr", BillingExpr: `v1:tier("base", p * 2)`}, ModelType: "language"}, 1.5)
+	require.NoError(t, err)
+	require.Equal(t, `v1:(tier("base", p * 2)) * 1.5`, versioned["billing_setting.billing_expr"])
+
+	for _, multiplier := range []float64{0, -1, math.Inf(1), math.NaN(), 1001} {
+		_, err := branchPricing(branchCatalogItem{Pricing: model.Pricing{ModelName: "image", QuotaType: 1, ModelPrice: 1}, ModelType: "image"}, multiplier)
+		require.Error(t, err)
+	}
 }
 
 func TestVideoBillingExpressionSupportsRequestAndSecond(t *testing.T) {

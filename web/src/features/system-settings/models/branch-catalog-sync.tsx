@@ -154,6 +154,7 @@ export function BranchCatalogSync() {
   const [updateRatios, setUpdateRatios] = useState<Record<string, boolean>>({})
   const [search, setSearch] = useState('')
   const [kind, setKind] = useState('all')
+  const [priceMultiplier, setPriceMultiplier] = useState('1')
   const [confirm, setConfirm] = useState(false)
   const [page, setPage] = useState(0)
   const config = useQuery({
@@ -223,12 +224,14 @@ export function BranchCatalogSync() {
         channel_id: activeChannel,
         catalog_version: preview?.catalog_version,
         channel_version: preview?.channel_version,
+        price_multiplier: Number(priceMultiplier),
         models: preview?.models
           .filter((row) => selected[row.model_name])
           .map((row) => ({
             model_name: row.model_name,
             expected_version: row.local.version,
-            update_price: !!updatePrices[row.model_name],
+            update_price:
+              Number(priceMultiplier) !== 1 || !!updatePrices[row.model_name],
             groups: selectedGroups[row.model_name] || [],
           })),
         groups: activeGroups.map((group) => ({
@@ -249,6 +252,14 @@ export function BranchCatalogSync() {
     },
   })
   const busy = fetchCatalog.isPending || apply.isPending || saveKey.isPending
+  const parsedPriceMultiplier = Number(priceMultiplier)
+  const validPriceMultiplier =
+    priceMultiplier.trim() !== '' &&
+    Number.isFinite(parsedPriceMultiplier) &&
+    parsedPriceMultiplier > 0 &&
+    parsedPriceMultiplier <= 1000
+  const appliesUniformPrice =
+    validPriceMultiplier && parsedPriceMultiplier !== 1
   const filtered = useMemo(
     () =>
       (preview?.models || []).filter(
@@ -260,7 +271,7 @@ export function BranchCatalogSync() {
   )
   const count = Object.values(selected).filter(Boolean).length
   const updateCount = Object.keys(selected).filter(
-    (name) => selected[name] && updatePrices[name]
+    (name) => selected[name] && (appliesUniformPrice || updatePrices[name])
   ).length
   const visible = filtered.slice(page * 20, (page + 1) * 20)
   const eligible = filtered.filter((row) => !row.blocked)
@@ -391,6 +402,34 @@ export function BranchCatalogSync() {
       </p>
       {preview && (
         <>
+          <Field orientation='horizontal' className='flex-wrap'>
+            <FieldLabel htmlFor='branch-price-multiplier'>
+              {t('Unified price multiplier')}
+            </FieldLabel>
+            <Input
+              id='branch-price-multiplier'
+              className='w-32'
+              type='number'
+              min='0.01'
+              max='1000'
+              step='0.01'
+              inputMode='decimal'
+              value={priceMultiplier}
+              disabled={busy}
+              aria-invalid={!validPriceMultiplier}
+              onChange={(event) => setPriceMultiplier(event.target.value)}
+            />
+            <span className='text-muted-foreground text-sm'>
+              {t(
+                '1 keeps the main site price. Other values update every selected model price.'
+              )}
+            </span>
+            {!validPriceMultiplier && (
+              <span role='alert' className='text-destructive text-sm'>
+                {t('Enter a multiplier greater than 0 and no more than 1000.')}
+              </span>
+            )}
+          </Field>
           <div className='flex flex-wrap items-center gap-3'>
             <Input
               className='max-w-xs'
@@ -433,7 +472,9 @@ export function BranchCatalogSync() {
             </span>
             <Button
               className='sm:ml-auto'
-              disabled={!count || busy || missingGroups}
+              disabled={
+                !count || busy || missingGroups || !validPriceMultiplier
+              }
               onClick={() => setConfirm(true)}
             >
               <Download className='size-4' />
@@ -629,6 +670,21 @@ export function BranchCatalogSync() {
                 ),
               },
               {
+                id: 'multiplied',
+                header: t('Price after multiplier'),
+                cellClassName: 'min-w-40 max-w-96 whitespace-normal',
+                cell: (row) =>
+                  validPriceMultiplier ? (
+                    <CatalogPrice
+                      values={row.incoming}
+                      video={row.model_type === 'video'}
+                      ratio={parsedPriceMultiplier}
+                    />
+                  ) : (
+                    '—'
+                  ),
+              },
+              {
                 id: 'update',
                 header: t('Update price'),
                 cell: (row) => (
@@ -637,9 +693,12 @@ export function BranchCatalogSync() {
                       aria-label={t('Update price for {{model}}', {
                         model: row.model_name,
                       })}
-                      checked={!!updatePrices[row.model_name]}
+                      checked={
+                        appliesUniformPrice || !!updatePrices[row.model_name]
+                      }
                       disabled={
                         busy ||
+                        appliesUniformPrice ||
                         !!row.blocked ||
                         Object.keys(row.local.configured).length === 0
                       }
@@ -684,8 +743,13 @@ export function BranchCatalogSync() {
         onOpenChange={setConfirm}
         title={t('Confirm model sync')}
         desc={t(
-          'Sync {{count}} models, update {{prices}} base prices and {{ratios}} group multipliers. Group multiplier changes affect all models in those groups.',
-          { count, prices: updateCount, ratios: ratioCount }
+          'Sync {{count}} models, update {{prices}} prices with a {{multiplier}} multiplier, and update {{ratios}} group multipliers. Group multiplier changes affect all models in those groups.',
+          {
+            count,
+            prices: updateCount,
+            multiplier: parsedPriceMultiplier,
+            ratios: ratioCount,
+          }
         )}
         confirmText={t('Apply sync')}
         isLoading={apply.isPending}

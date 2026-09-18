@@ -103,3 +103,84 @@ it('keeps the entered key available to correct when upstream validation fails', 
   ).toBeDisabled()
   client.clear()
 })
+
+it('applies one price multiplier to every selected model price', async () => {
+  const { client } = renderSync(true)
+  let applyBody: Record<string, unknown> | undefined
+  vi.spyOn(api, 'post').mockImplementation(async (url, body) => {
+    if (url === '/api/option/branch_catalog/preview') {
+      return {
+        data: {
+          success: true,
+          data: {
+            catalog_version: 'catalog-v1',
+            channel_version: 'channel-v1',
+            group_ratio: { default: 1 },
+            models: [
+              {
+                model_name: 'image-model',
+                model_type: 'image',
+                local: {
+                  model_name: 'image-model',
+                  version: 'price-v1',
+                  configured: { ModelPrice: 0.1 },
+                  effective: { ModelPrice: 0.1 },
+                },
+                incoming: {
+                  ModelPrice: 0.2,
+                  'billing_setting.billing_mode': 'ratio',
+                },
+                imported: true,
+                changed: true,
+                groups: [
+                  {
+                    name: 'default',
+                    ratio: 1,
+                    local: { ratio: 1, version: 'group-v1' },
+                    imported: true,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      }
+    }
+    applyBody = body as Record<string, unknown>
+    return { data: { success: true, data: { count: 1 } } }
+  })
+
+  const fetch = await screen.findByRole('button', {
+    name: 'Fetch main site models',
+  })
+  await waitFor(() => expect(fetch).toBeEnabled())
+  fireEvent.click(fetch)
+  await screen.findByText('image-model')
+  fireEvent.change(screen.getByLabelText('Unified price multiplier'), {
+    target: { value: '1.5' },
+  })
+  fireEvent.click(screen.getByLabelText('Select filtered models'))
+
+  const updatePrice = screen.getByLabelText('Update price for image-model')
+  expect(updatePrice).toBeChecked()
+  expect(updatePrice).toHaveAttribute('aria-disabled', 'true')
+  expect(screen.getByText('Price after multiplier')).toBeVisible()
+
+  fireEvent.click(
+    screen.getByRole('button', { name: /Confirm selected models/ })
+  )
+  fireEvent.click(await screen.findByRole('button', { name: 'Apply sync' }))
+  await waitFor(() => expect(applyBody).toBeDefined())
+  expect(applyBody).toEqual(
+    expect.objectContaining({
+      price_multiplier: 1.5,
+      models: [
+        expect.objectContaining({
+          model_name: 'image-model',
+          update_price: true,
+        }),
+      ],
+    })
+  )
+  client.clear()
+})

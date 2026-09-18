@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"slices"
 	"strings"
@@ -152,10 +153,13 @@ func requestBranchCatalog(ctx context.Context, key string) (*branchCatalog, erro
 	return &envelope.Data, nil
 }
 
-func branchPricing(item branchCatalogItem) (model.PricingValues, error) {
+func branchPricing(item branchCatalogItem, priceMultiplier float64) (model.PricingValues, error) {
+	if math.IsNaN(priceMultiplier) || math.IsInf(priceMultiplier, 0) || priceMultiplier <= 0 || priceMultiplier > 1000 {
+		return nil, errors.New("统一价格倍率必须大于 0 且不超过 1000")
+	}
 	values := model.PricingValues{"billing_setting.billing_mode": "ratio"}
 	if item.ModelType == "video" {
-		expr, err := videoBillingExpression(item.VideoBillingUnit, item.ModelPrice)
+		expr, err := videoBillingExpression(item.VideoBillingUnit, item.ModelPrice*priceMultiplier)
 		if err != nil {
 			return nil, err
 		}
@@ -164,10 +168,19 @@ func branchPricing(item branchCatalogItem) (model.PricingValues, error) {
 	} else if item.BillingMode == "tiered_expr" {
 		values["billing_setting.billing_mode"] = "tiered_expr"
 		values["billing_setting.billing_expr"] = item.BillingExpr
+		if priceMultiplier != 1 {
+			body := item.BillingExpr
+			prefix := ""
+			if unversioned, ok := strings.CutPrefix(body, "v1:"); ok {
+				prefix = "v1:"
+				body = unversioned
+			}
+			values["billing_setting.billing_expr"] = fmt.Sprintf("%s(%s) * %.15g", prefix, body, priceMultiplier)
+		}
 	} else if item.QuotaType == 1 {
-		values["ModelPrice"] = item.ModelPrice
+		values["ModelPrice"] = item.ModelPrice * priceMultiplier
 	} else if item.QuotaType == 0 {
-		values["ModelRatio"] = item.ModelRatio
+		values["ModelRatio"] = item.ModelRatio * priceMultiplier
 		values["CompletionRatio"] = item.CompletionRatio
 		for key, value := range map[string]*float64{"CacheRatio": item.CacheRatio, "CreateCacheRatio": item.CreateCacheRatio, "ImageRatio": item.ImageRatio, "AudioRatio": item.AudioRatio, "AudioCompletionRatio": item.AudioCompletionRatio} {
 			if value != nil {
@@ -210,7 +223,7 @@ func branchCatalogVersion(catalog *branchCatalog) (string, error) {
 		}
 		endpoints := slices.Clone(item.SupportedEndpointTypes)
 		slices.Sort(endpoints)
-		pricing, _ := branchPricing(item)
+		pricing, _ := branchPricing(item, 1)
 		// Only fields that this importer applies belong in the preview identity.
 		// Main-site endpoint maps and runtime statistics are not imported.
 		rows = append(rows, []any{item.ModelName, item.ModelType, item.VideoBillingUnit, pricing, item.Description, item.Icon, item.Tags, endpoints, branchItemGroups(item, catalog)})
@@ -275,7 +288,7 @@ func PreviewBranchCatalog(c *gin.Context) {
 		if !item.SyncEnabled {
 			continue
 		}
-		incoming, err := branchPricing(item)
+		incoming, err := branchPricing(item, 1)
 		row := branchPreviewRow{branchCatalogItem: item, Local: local[item.ModelName], Incoming: incoming, Imported: slices.Contains(channel.GetModels(), item.ModelName)}
 		if item.ModelType == "video" {
 			row.Imported = slices.Contains(videoChannel.GetModels(), item.ModelName)
@@ -305,10 +318,11 @@ func PreviewBranchCatalog(c *gin.Context) {
 
 func ApplyBranchCatalog(c *gin.Context) {
 	var request struct {
-		ChannelID      int    `json:"channel_id"`
-		CatalogVersion string `json:"catalog_version"`
-		ChannelVersion string `json:"channel_version"`
-		Models         []struct {
+		ChannelID       int      `json:"channel_id"`
+		CatalogVersion  string   `json:"catalog_version"`
+		ChannelVersion  string   `json:"channel_version"`
+		PriceMultiplier *float64 `json:"price_multiplier"`
+		Models          []struct {
 			ModelName       string   `json:"model_name"`
 			ExpectedVersion string   `json:"expected_version"`
 			UpdatePrice     bool     `json:"update_price"`
@@ -318,6 +332,14 @@ func ApplyBranchCatalog(c *gin.Context) {
 	}
 	if c.ShouldBindJSON(&request) != nil || len(request.Models) == 0 || len(request.Models) > 5000 {
 		common.ApiErrorMsg(c, "请选择需要同步的模型")
+		return
+	}
+	priceMultiplier := 1.0
+	if request.PriceMultiplier != nil {
+		priceMultiplier = *request.PriceMultiplier
+	}
+	if math.IsNaN(priceMultiplier) || math.IsInf(priceMultiplier, 0) || priceMultiplier <= 0 || priceMultiplier > 1000 {
+		common.ApiErrorMsg(c, "统一价格倍率必须大于 0 且不超过 1000")
 		return
 	}
 	channel, catalog, err := fetchBranchCatalog(c, request.ChannelID)
@@ -348,7 +370,7 @@ func ApplyBranchCatalog(c *gin.Context) {
 			common.ApiErrorMsg(c, "所选模型已停止下发，请重新拉取")
 			return
 		}
-		pricing, err := branchPricing(item)
+		pricing, err := branchPricing(item, priceMultiplier)
 		if err != nil {
 			common.ApiError(c, err)
 			return
@@ -366,7 +388,7 @@ func ApplyBranchCatalog(c *gin.Context) {
 			usedGroups[name] = true
 		}
 		endpoints, _ := common.Marshal(item.SupportedEndpointTypes)
-		imports = append(imports, model.BranchModelImport{Change: model.ModelPricingChange{ModelName: item.ModelName, ExpectedVersion: selection.ExpectedVersion, Pricing: pricing}, UpdatePrice: selection.UpdatePrice, Video: item.ModelType == "video", Groups: selection.Groups, Metadata: model.Model{ModelName: item.ModelName, Description: item.Description, Icon: item.Icon, Tags: item.Tags, Endpoints: string(endpoints)}})
+		imports = append(imports, model.BranchModelImport{Change: model.ModelPricingChange{ModelName: item.ModelName, ExpectedVersion: selection.ExpectedVersion, Pricing: pricing}, UpdatePrice: selection.UpdatePrice || priceMultiplier != 1, Video: item.ModelType == "video", Groups: selection.Groups, Metadata: model.Model{ModelName: item.ModelName, Description: item.Description, Icon: item.Icon, Tags: item.Tags, Endpoints: string(endpoints)}})
 	}
 	if len(request.Groups) != len(usedGroups) {
 		common.ApiErrorMsg(c, "所选分组确认信息不完整")
@@ -385,6 +407,6 @@ func ApplyBranchCatalog(c *gin.Context) {
 		return
 	}
 	model.InitChannelCache()
-	recordManageAudit(c, "branch.catalog.sync", map[string]any{"channel_id": channel.Id, "count": len(imports), "catalog_version": catalog.Version})
+	recordManageAudit(c, "branch.catalog.sync", map[string]any{"channel_id": channel.Id, "count": len(imports), "catalog_version": catalog.Version, "price_multiplier": priceMultiplier})
 	common.ApiSuccess(c, gin.H{"count": len(imports)})
 }
