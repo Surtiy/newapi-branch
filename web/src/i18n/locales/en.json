@@ -14,6 +14,7 @@
     "Enter a multiplier greater than 0 and no more than 1000.": "Enter a multiplier greater than 0 and no more than 1000.",
     "Price after multiplier": "Price after multiplier",
     "Sync {{count}} models, update {{prices}} prices with a {{multiplier}} multiplier, and update {{ratios}} group multipliers. Group multiplier changes affect all models in those groups.": "Sync {{count}} models, update {{prices}} prices with a {{multiplier}} multiplier, and update {{ratios}} group multipliers. Group multiplier changes affect all models in those groups.",
+    "Only groups and models available to the main site API key are shown. Models are unselected by default; unselected models are not synced or changed.": "Only groups and models available to the main site API key are shown. Models are unselected by default; unselected models are not synced or changed.",
     "API Docs Management": "API Docs Management",
     "Main Site Model Sync": "Main Site Model Sync",
     "360": "360",

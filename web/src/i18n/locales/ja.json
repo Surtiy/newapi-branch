@@ -14,6 +14,7 @@
     "Enter a multiplier greater than 0 and no more than 1000.": "0 より大きく 1000 以下の倍率を入力してください。",
     "Price after multiplier": "倍率適用後の価格",
     "Sync {{count}} models, update {{prices}} prices with a {{multiplier}} multiplier, and update {{ratios}} group multipliers. Group multiplier changes affect all models in those groups.": "{{count}} 個のモデルを同期し、{{prices}} 個の価格を {{multiplier}} 倍で更新し、{{ratios}} 個のグループ倍率を更新します。グループ倍率の変更はそのグループ内の全モデルに適用されます。",
+    "Only groups and models available to the main site API key are shown. Models are unselected by default; unselected models are not synced or changed.": "メインサイトの API キーで利用できるグループとモデルのみ表示します。モデルは初期状態では未選択で、選択しないモデルは同期も変更もされません。",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

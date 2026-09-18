@@ -79,6 +79,22 @@ func TestBranchCatalogDoesNotFollowRedirectsOrExposeUpstreamErrors(t *testing.T)
 	require.NotContains(t, err.Error(), "secret")
 }
 
+func TestRequestBranchCatalogKeepsOnlyAPIKeyModelsAndGroups(t *testing.T) {
+	original := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = original })
+	http.DefaultTransport = branchCatalogTransport(func(r *http.Request) (*http.Response, error) {
+		require.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+		body := `{"success":true,"data":{"catalog_version":"v1","group_ratio":{"key-group":0.8,"other-group":9},"models":[{"model_name":"allowed","sync_enabled":true,"group_ratios":{"key-group":0.8}},{"model_name":"outside-key","sync_enabled":true},{"model_name":"not-published","sync_enabled":false,"group_ratios":{"key-group":0.8}}]}}`
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})
+
+	catalog, err := requestBranchCatalog(context.Background(), "test-key")
+	require.NoError(t, err)
+	require.Equal(t, map[string]float64{"key-group": 0.8}, catalog.GroupRatio)
+	require.Len(t, catalog.Models, 1)
+	require.Equal(t, "allowed", catalog.Models[0].ModelName)
+}
+
 func TestBranchCatalogPreservesCacheAndPricingModes(t *testing.T) {
 	zero := 0.0
 	write := 1.25
@@ -92,6 +108,30 @@ func TestBranchCatalogPreservesCacheAndPricingModes(t *testing.T) {
 	require.NotContains(t, values, "ModelRatio")
 	_, err = branchPricing(branchCatalogItem{ModelType: "video"}, 1)
 	require.Error(t, err)
+}
+
+func TestScopeBranchCatalogUsesAPIKeyGroupsOnly(t *testing.T) {
+	catalog := branchCatalog{
+		GroupRatio: map[string]float64{"key-group": 0.8, "other-group": 9},
+		Models: []branchCatalogItem{
+			{Pricing: model.Pricing{ModelName: "allowed", EnableGroup: []string{"key-group", "other-group"}}, SyncEnabled: true, GroupRatios: map[string]float64{"key-group": 0.8}},
+			{Pricing: model.Pricing{ModelName: "outside-key", EnableGroup: []string{"other-group"}}, SyncEnabled: true},
+			{Pricing: model.Pricing{ModelName: "not-published"}, SyncEnabled: false, GroupRatios: map[string]float64{"key-group": 0.8}},
+		},
+	}
+	require.NoError(t, scopeBranchCatalog(&catalog))
+	require.Len(t, catalog.Models, 1)
+	require.Equal(t, "allowed", catalog.Models[0].ModelName)
+	require.Equal(t, map[string]float64{"key-group": 0.8}, catalog.GroupRatio)
+	require.Equal(t, map[string]float64{"key-group": 0.8}, branchItemGroups(catalog.Models[0]))
+}
+
+func TestScopeBranchCatalogRejectsInconsistentAPIKeyGroups(t *testing.T) {
+	catalog := branchCatalog{Models: []branchCatalogItem{
+		{Pricing: model.Pricing{ModelName: "first"}, SyncEnabled: true, GroupRatios: map[string]float64{"key-group": 0.8}},
+		{Pricing: model.Pricing{ModelName: "second"}, SyncEnabled: true, GroupRatios: map[string]float64{"key-group": 1.2}},
+	}}
+	require.ErrorContains(t, scopeBranchCatalog(&catalog), "倍率不一致")
 }
 
 func TestBranchPricingAppliesUniformPriceMultiplier(t *testing.T) {
@@ -136,8 +176,8 @@ func TestVideoBillingExpressionSupportsRequestAndSecond(t *testing.T) {
 
 func TestBranchCatalogVersionTracksImportedFieldsOnly(t *testing.T) {
 	base := branchCatalog{Version: "upstream-a", Models: []branchCatalogItem{
-		{Pricing: model.Pricing{ModelName: "image-a", QuotaType: 1, ModelPrice: 0.3}, ModelType: "image", SyncEnabled: true},
-		{Pricing: model.Pricing{ModelName: "image-b", QuotaType: 1, ModelPrice: 0.5}, ModelType: "image", SyncEnabled: true},
+		{Pricing: model.Pricing{ModelName: "image-a", QuotaType: 1, ModelPrice: 0.3}, ModelType: "image", SyncEnabled: true, GroupRatios: map[string]float64{"default": 1}},
+		{Pricing: model.Pricing{ModelName: "image-b", QuotaType: 1, ModelPrice: 0.5}, ModelType: "image", SyncEnabled: true, GroupRatios: map[string]float64{"default": 1}},
 	}}
 	hash, err := branchCatalogVersion(&base)
 	require.NoError(t, err)
@@ -179,7 +219,7 @@ func TestBranchCatalogVersionTracksImportedFieldsOnly(t *testing.T) {
 
 func TestBranchCatalogVersionTracksSelectedGroupRules(t *testing.T) {
 	base := branchCatalog{GroupRatio: map[string]float64{"group-a": 0.11, "group-b": 1.2}, Models: []branchCatalogItem{
-		{Pricing: model.Pricing{ModelName: "image-a", QuotaType: 1, ModelPrice: 0.3, EnableGroup: []string{"group-a"}}, ModelType: "image", SyncEnabled: true},
+		{Pricing: model.Pricing{ModelName: "image-a", QuotaType: 1, ModelPrice: 0.3}, ModelType: "image", SyncEnabled: true, GroupRatios: map[string]float64{"group-a": 0.11}},
 	}}
 	original, err := branchCatalogVersion(&base)
 	require.NoError(t, err)
@@ -187,12 +227,11 @@ func TestBranchCatalogVersionTracksSelectedGroupRules(t *testing.T) {
 	unchanged, err := branchCatalogVersion(&base)
 	require.NoError(t, err)
 	require.Equal(t, original, unchanged)
-	base.GroupRatio["group-a"] = 0.5
+	base.Models[0].GroupRatios["group-a"] = 0.5
 	changed, err := branchCatalogVersion(&base)
 	require.NoError(t, err)
 	require.NotEqual(t, original, changed)
-	base.GroupRatio["group-a"] = 0.11
-	base.Models[0].EnableGroup = []string{"group-b"}
+	base.Models[0].GroupRatios = map[string]float64{"group-b": 1.2}
 	changed, err = branchCatalogVersion(&base)
 	require.NoError(t, err)
 	require.NotEqual(t, original, changed)

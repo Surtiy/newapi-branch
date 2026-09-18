@@ -14,6 +14,7 @@
     "Enter a multiplier greater than 0 and no more than 1000.": "Введите множитель больше 0 и не больше 1000.",
     "Price after multiplier": "Цена после умножения",
     "Sync {{count}} models, update {{prices}} prices with a {{multiplier}} multiplier, and update {{ratios}} group multipliers. Group multiplier changes affect all models in those groups.": "Синхронизировать {{count}} моделей, обновить {{prices}} цен с множителем {{multiplier}} и {{ratios}} множителей групп. Изменение множителя группы влияет на все модели этой группы.",
+    "Only groups and models available to the main site API key are shown. Models are unselected by default; unselected models are not synced or changed.": "Показываются только группы и модели, доступные API-ключу основного сайта. По умолчанию модели не выбраны; невыбранные модели не синхронизируются и не изменяются.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

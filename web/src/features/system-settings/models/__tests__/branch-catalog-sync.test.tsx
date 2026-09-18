@@ -159,6 +159,10 @@ it('applies one price multiplier to every selected model price', async () => {
   fireEvent.change(screen.getByLabelText('Unified price multiplier'), {
     target: { value: '1.5' },
   })
+  expect(screen.getByLabelText('Select image-model')).not.toBeChecked()
+  expect(
+    screen.getByRole('button', { name: /Confirm selected models/ })
+  ).toBeDisabled()
   fireEvent.click(screen.getByLabelText('Select filtered models'))
 
   const updatePrice = screen.getByLabelText('Update price for image-model')

@@ -14,6 +14,7 @@
     "Enter a multiplier greater than 0 and no more than 1000.": "Nhập hệ số lớn hơn 0 và không quá 1000.",
     "Price after multiplier": "Giá sau khi nhân",
     "Sync {{count}} models, update {{prices}} prices with a {{multiplier}} multiplier, and update {{ratios}} group multipliers. Group multiplier changes affect all models in those groups.": "Đồng bộ {{count}} mô hình, cập nhật {{prices}} mức giá với hệ số {{multiplier}} và {{ratios}} hệ số nhóm. Thay đổi hệ số nhóm ảnh hưởng đến mọi mô hình trong nhóm đó.",
+    "Only groups and models available to the main site API key are shown. Models are unselected by default; unselected models are not synced or changed.": "Chỉ hiển thị các nhóm và mô hình mà khóa API trang chính có thể sử dụng. Mô hình mặc định không được chọn; mô hình không chọn sẽ không được đồng bộ hoặc thay đổi.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

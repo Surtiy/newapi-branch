@@ -51,17 +51,42 @@ type branchPreviewGroup struct {
 	Imported bool                   `json:"imported"`
 }
 
-func branchItemGroups(item branchCatalogItem, catalog *branchCatalog) map[string]float64 {
-	groups := map[string]float64{}
-	for _, name := range item.EnableGroup {
-		if name == "auto" {
-			continue
-		}
-		if ratio, ok := catalog.GroupRatio[name]; ok {
+func branchItemGroups(item branchCatalogItem) map[string]float64 {
+	groups := make(map[string]float64, len(item.GroupRatios))
+	for name, ratio := range item.GroupRatios {
+		if name != "auto" {
 			groups[name] = ratio
 		}
 	}
 	return groups
+}
+
+func scopeBranchCatalog(catalog *branchCatalog) error {
+	models := make([]branchCatalogItem, 0, len(catalog.Models))
+	groups := make(map[string]float64)
+	for _, item := range catalog.Models {
+		if !item.SyncEnabled {
+			continue
+		}
+		itemGroups := branchItemGroups(item)
+		if len(itemGroups) == 0 {
+			continue
+		}
+		for name, ratio := range itemGroups {
+			if strings.TrimSpace(name) == "" || strings.ContainsAny(name, ",\r\n") || len([]rune(name)) > 64 || math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 0 {
+				return errors.New("主站返回的 API Key 分组配置无效")
+			}
+			if existing, ok := groups[name]; ok && existing != ratio {
+				return fmt.Errorf("主站返回的分组 %s 倍率不一致", name)
+			}
+			groups[name] = ratio
+		}
+		item.GroupRatios = itemGroups
+		models = append(models, item)
+	}
+	catalog.Models = models
+	catalog.GroupRatio = groups
+	return nil
 }
 
 func GetBranchCatalogChannels(c *gin.Context) {
@@ -150,6 +175,9 @@ func requestBranchCatalog(ctx context.Context, key string) (*branchCatalog, erro
 	if err := common.DecodeJson(io.LimitReader(response.Body, 16<<20), &envelope); err != nil || !envelope.Success || envelope.Data.Version == "" {
 		return nil, errors.New("主站目录格式无效")
 	}
+	if err := scopeBranchCatalog(&envelope.Data); err != nil {
+		return nil, err
+	}
 	return &envelope.Data, nil
 }
 
@@ -218,7 +246,7 @@ func branchCatalogVersion(catalog *branchCatalog) (string, error) {
 	slices.SortFunc(items, func(a, b branchCatalogItem) int { return strings.Compare(a.ModelName, b.ModelName) })
 	rows := make([]any, 0, len(items))
 	for _, item := range items {
-		if !item.SyncEnabled {
+		if !item.SyncEnabled || len(branchItemGroups(item)) == 0 {
 			continue
 		}
 		endpoints := slices.Clone(item.SupportedEndpointTypes)
@@ -226,7 +254,7 @@ func branchCatalogVersion(catalog *branchCatalog) (string, error) {
 		pricing, _ := branchPricing(item, 1)
 		// Only fields that this importer applies belong in the preview identity.
 		// Main-site endpoint maps and runtime statistics are not imported.
-		rows = append(rows, []any{item.ModelName, item.ModelType, item.VideoBillingUnit, pricing, item.Description, item.Icon, item.Tags, endpoints, branchItemGroups(item, catalog)})
+		rows = append(rows, []any{item.ModelName, item.ModelType, item.VideoBillingUnit, pricing, item.Description, item.Icon, item.Tags, endpoints, branchItemGroups(item)})
 	}
 	raw, err := common.Marshal(rows)
 	if err != nil {
@@ -293,7 +321,7 @@ func PreviewBranchCatalog(c *gin.Context) {
 		if item.ModelType == "video" {
 			row.Imported = slices.Contains(videoChannel.GetModels(), item.ModelName)
 		}
-		for name, ratio := range branchItemGroups(item, catalog) {
+		for name, ratio := range branchItemGroups(item) {
 			imported := slices.Contains(importedGroups[model.BranchGroupChannelTag(channel.Id, name, item.ModelType == "video")], item.ModelName)
 			row.Groups = append(row.Groups, branchPreviewGroup{Name: name, Ratio: ratio, Local: groupStates[name], Imported: imported})
 			row.Imported = row.Imported || imported
@@ -358,7 +386,7 @@ func ApplyBranchCatalog(c *gin.Context) {
 	}
 	byName := make(map[string]branchCatalogItem)
 	for _, item := range catalog.Models {
-		if item.SyncEnabled {
+		if item.SyncEnabled && len(branchItemGroups(item)) > 0 {
 			byName[item.ModelName] = item
 		}
 	}
@@ -375,7 +403,7 @@ func ApplyBranchCatalog(c *gin.Context) {
 			common.ApiError(c, err)
 			return
 		}
-		allowedGroups := branchItemGroups(item, catalog)
+		allowedGroups := branchItemGroups(item)
 		if len(selection.Groups) == 0 {
 			common.ApiErrorMsg(c, "请选择模型对应的分组；旧页面请刷新后重新拉取")
 			return

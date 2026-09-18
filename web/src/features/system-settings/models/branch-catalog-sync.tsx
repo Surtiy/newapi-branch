@@ -400,6 +400,11 @@ export function BranchCatalogSync() {
           'Group multipliers are shared by models in the same group. Existing multipliers are preserved unless selected for update.'
         )}
       </p>
+      <p className='text-muted-foreground text-sm'>
+        {t(
+          'Only groups and models available to the main site API key are shown. Models are unselected by default; unselected models are not synced or changed.'
+        )}
+      </p>
       {preview && (
         <>
           <Field orientation='horizontal' className='flex-wrap'>
@@ -489,34 +494,42 @@ export function BranchCatalogSync() {
               {
                 id: 'select',
                 header: (
-                  <Checkbox
-                    aria-label={t('Select filtered models')}
-                    disabled={busy || !eligible.length}
-                    checked={allSelected}
-                    onCheckedChange={(checked) =>
-                      setSelected((previous) => ({
-                        ...previous,
-                        ...Object.fromEntries(
-                          eligible.map((row) => [row.model_name, !!checked])
-                        ),
-                      }))
-                    }
-                  />
+                  <div className='flex items-center gap-2'>
+                    <Checkbox
+                      aria-label={t('Select filtered models')}
+                      disabled={busy || !eligible.length}
+                      checked={allSelected}
+                      onCheckedChange={(checked) =>
+                        setSelected((previous) => ({
+                          ...previous,
+                          ...Object.fromEntries(
+                            eligible.map((row) => [row.model_name, !!checked])
+                          ),
+                        }))
+                      }
+                    />
+                    <span>{t('Sync')}</span>
+                  </div>
                 ),
                 cell: (row) => (
-                  <Checkbox
-                    aria-label={t('Select {{model}}', {
-                      model: row.model_name,
-                    })}
-                    disabled={busy || !!row.blocked}
-                    checked={!!selected[row.model_name]}
-                    onCheckedChange={(checked) =>
-                      setSelected((previous) => ({
-                        ...previous,
-                        [row.model_name]: !!checked,
-                      }))
-                    }
-                  />
+                  <div className='flex items-center gap-2'>
+                    <Checkbox
+                      aria-label={t('Select {{model}}', {
+                        model: row.model_name,
+                      })}
+                      disabled={busy || !!row.blocked}
+                      checked={!!selected[row.model_name]}
+                      onCheckedChange={(checked) =>
+                        setSelected((previous) => ({
+                          ...previous,
+                          [row.model_name]: !!checked,
+                        }))
+                      }
+                    />
+                    <span className='text-muted-foreground text-xs'>
+                      {t('Sync')}
+                    </span>
+                  </div>
                 ),
               },
               {

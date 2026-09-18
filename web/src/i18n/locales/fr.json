@@ -14,6 +14,7 @@
     "Enter a multiplier greater than 0 and no more than 1000.": "Saisissez un multiplicateur supérieur à 0 et inférieur ou égal à 1000.",
     "Price after multiplier": "Prix après multiplicateur",
     "Sync {{count}} models, update {{prices}} prices with a {{multiplier}} multiplier, and update {{ratios}} group multipliers. Group multiplier changes affect all models in those groups.": "Synchroniser {{count}} modèles, mettre à jour {{prices}} prix avec un multiplicateur de {{multiplier}} et {{ratios}} multiplicateurs de groupe. Les changements de multiplicateur affectent tous les modèles de ces groupes.",
+    "Only groups and models available to the main site API key are shown. Models are unselected by default; unselected models are not synced or changed.": "Seuls les groupes et modèles accessibles avec la clé API du site principal sont affichés. Les modèles sont désélectionnés par défaut ; ceux qui restent désélectionnés ne sont ni synchronisés ni modifiés.",
     "360": "360",
     "1000": "1000",
     "10000": "10000",

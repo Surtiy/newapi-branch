@@ -14,6 +14,7 @@
     "Enter a multiplier greater than 0 and no more than 1000.": "请输入大于 0 且不超过 1000 的倍率。",
     "Price after multiplier": "倍率后价格",
     "Sync {{count}} models, update {{prices}} prices with a {{multiplier}} multiplier, and update {{ratios}} group multipliers. Group multiplier changes affect all models in those groups.": "将同步 {{count}} 个模型，按 {{multiplier}} 倍更新 {{prices}} 个模型价格，并更新 {{ratios}} 个分组倍率。分组倍率变更会影响该分组下的所有模型。",
+    "Only groups and models available to the main site API key are shown. Models are unselected by default; unselected models are not synced or changed.": "仅显示主站 API Key 可用的分组和模型。模型默认不勾选，未勾选的模型不会同步或改动。",
     "API Docs": "接口文档",
     "API Docs Management": "接口文档管理",
     "Title": "标题",
