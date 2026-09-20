@@ -160,6 +160,14 @@ export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
           ) : null}
         </DetailSection>
 
+        {props.log.request_params ? (
+          <DetailSection label={t('Request Parameters')}>
+            <pre className='bg-background max-h-72 overflow-auto rounded border p-2 font-mono text-xs whitespace-pre-wrap'>
+              {JSON.stringify(props.log.request_params, null, 2)}
+            </pre>
+          </DetailSection>
+        ) : null}
+
         {props.isAdmin ? (
           <DetailSection
             label={t('Admin Only')}

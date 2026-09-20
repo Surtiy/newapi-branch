@@ -748,6 +748,11 @@ func executeTaskSubmissionWith(
 		TieredSnapshot:  relayInfo.TieredBillingSnapshot,
 	}
 	task.Quota = result.Quota
+	if storage, bodyErr := common.GetBodyStorage(c); bodyErr == nil {
+		if body, readErr := storage.Bytes(); readErr == nil {
+			task.PrivateData.RequestParams = model.BuildTaskRequestParams(body, c.Request.Header.Get("Content-Type"))
+		}
+	}
 	task.Data = result.TaskData
 	if len(result.PluginState) > 0 {
 		task.PrivateData.PluginState = result.PluginState

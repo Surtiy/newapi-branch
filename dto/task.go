@@ -51,6 +51,7 @@ type TaskDto struct {
 	Properties           any             `json:"properties"`
 	Username             string          `json:"username,omitempty"`
 	Data                 json.RawMessage `json:"data"`
+	RequestParams        json.RawMessage `json:"request_params,omitempty"`
 	AdminInfo            *TaskAdminInfo  `json:"admin_info,omitempty"`
 	RootInfo             *TaskRootInfo   `json:"root_info,omitempty"`
 }

@@ -310,6 +310,7 @@ export interface TaskLog {
   progress?: string
   progress_message_en?: string
   data?: unknown
+  request_params?: unknown
   properties?: {
     input?: string
     upstream_model_name?: string
