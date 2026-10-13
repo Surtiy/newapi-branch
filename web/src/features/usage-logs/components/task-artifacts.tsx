@@ -165,6 +165,7 @@ function ArtifactMedia(props: {
       <video
         src={props.mediaUrl}
         controls
+        playsInline
         preload='metadata'
         className='max-h-[60vh] w-full rounded-md bg-black'
         onError={props.onError}
@@ -401,6 +402,22 @@ function LegacyTaskArtifacts(props: { legacyContentUrl?: string }) {
   return <EmptyTaskArtifacts />
 }
 
+export function TaskArtifactsPanel(props: { log: TaskLog; enabled: boolean }) {
+  if (!shouldLoadTaskArtifacts(props.log, props.enabled)) return null
+  if (resolveTaskPreviewMode(props.log) === 'legacy-suno') {
+    return <LegacyAudioPreview data={props.log.data} />
+  }
+  return (
+    <TaskArtifacts
+      taskId={props.log.task_id}
+      enabled={props.enabled}
+      emptyContent={(legacyContentUrl) => (
+        <LegacyTaskArtifacts legacyContentUrl={legacyContentUrl} />
+      )}
+    />
+  )
+}
+
 export function TaskArtifactsCell(props: { log: TaskLog }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -462,13 +479,7 @@ export function TaskArtifactsCell(props: { log: TaskLog }) {
         contentHeight='auto'
         bodyClassName='pr-2 sm:pr-4'
       >
-        <TaskArtifacts
-          taskId={props.log.task_id}
-          enabled={shouldLoadTaskArtifacts(props.log, open)}
-          emptyContent={(legacyContentUrl) => (
-            <LegacyTaskArtifacts legacyContentUrl={legacyContentUrl} />
-          )}
-        />
+        <TaskArtifactsPanel log={props.log} enabled={open} />
       </Dialog>
     </>
   )
@@ -494,6 +505,7 @@ function LegacyVideoMedia(props: LegacyVideoMediaProps) {
       key={mediaRevision}
       src={props.contentUrl}
       controls
+      playsInline
       preload='metadata'
       className='max-h-[60vh] w-full rounded-md bg-black'
       onError={() => setMediaFailed(true)}

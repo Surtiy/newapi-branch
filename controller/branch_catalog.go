@@ -22,10 +22,18 @@ const branchMainURL = model.BranchMainURL
 
 type branchCatalogItem struct {
 	model.Pricing
-	ModelType        string             `json:"model_type"`
-	VideoBillingUnit string             `json:"video_billing_unit"`
-	SyncEnabled      bool               `json:"sync_enabled"`
-	GroupRatios      map[string]float64 `json:"group_ratios"`
+	ModelType         string                  `json:"model_type"`
+	VideoBillingUnit  string                  `json:"video_billing_unit"`
+	SyncEnabled       bool                    `json:"sync_enabled"`
+	GroupRatios       map[string]float64      `json:"group_ratios"`
+	ConflictingGroups []string                `json:"-"`
+	DuplicateSources  []branchDuplicateSource `json:"duplicate_sources,omitempty"`
+}
+
+type branchDuplicateSource struct {
+	ChannelID  int      `json:"channel_id"`
+	KeyPreview string   `json:"key_preview"`
+	Groups     []string `json:"groups"`
 }
 
 type branchCatalog struct {
@@ -36,12 +44,13 @@ type branchCatalog struct {
 
 type branchPreviewRow struct {
 	branchCatalogItem
-	Local    model.ModelPricingEntry `json:"local"`
-	Incoming model.PricingValues     `json:"incoming"`
-	Imported bool                    `json:"imported"`
-	Changed  bool                    `json:"changed"`
-	Blocked  string                  `json:"blocked,omitempty"`
-	Groups   []branchPreviewGroup    `json:"groups"`
+	Local             model.ModelPricingEntry `json:"local"`
+	Incoming          model.PricingValues     `json:"incoming"`
+	Imported          bool                    `json:"imported"`
+	Changed           bool                    `json:"changed"`
+	Blocked           string                  `json:"blocked,omitempty"`
+	Groups            []branchPreviewGroup    `json:"groups"`
+	ConflictingGroups []string                `json:"conflicting_groups,omitempty"`
 }
 
 type branchPreviewGroup struct {
@@ -89,9 +98,38 @@ func scopeBranchCatalog(catalog *branchCatalog) error {
 	return nil
 }
 
+func branchCatalogKeyPreview(key string) string {
+	key = strings.TrimSpace(key)
+	if strings.HasPrefix(key, "sk-") {
+		return "sk-" + model.MaskTokenKey(strings.TrimPrefix(key, "sk-"))
+	}
+	return model.MaskTokenKey(key)
+}
+
+func branchCatalogSaveErrorMessage(key string, err error) string {
+	var conflictError *model.BranchCatalogKeyConflictError
+	if !errors.As(err, &conflictError) {
+		return "保存主站 API Key 失败，渠道配置可能已变化，请刷新后重试"
+	}
+	reasons := []string{fmt.Sprintf("令牌 %s 保存失败：", branchCatalogKeyPreview(key))}
+	for _, conflict := range conflictError.Conflicts {
+		owner := fmt.Sprintf("来源 #%d", conflict.ChannelID)
+		if channel, lookupErr := model.GetChannelById(conflict.ChannelID, true); lookupErr == nil {
+			owner = fmt.Sprintf("令牌 %s（来源 #%d）", branchCatalogKeyPreview(channel.Key), conflict.ChannelID)
+		}
+		if conflict.DuplicateKey {
+			reasons = append(reasons, fmt.Sprintf("该令牌已保存为 %s，分组：%s。请在原记录中维护。", owner, strings.Join(conflict.Groups, "、")))
+		} else {
+			reasons = append(reasons, fmt.Sprintf("重复分组：%s；已绑定 %s。", strings.Join(conflict.Groups, "、"), owner))
+		}
+	}
+	return strings.Join(reasons, "\n")
+}
+
 func GetBranchCatalogChannels(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	var channels []model.Channel
-	if err := model.DB.Select("id", "name", "base_url", "status", "key", "channel_info").Where("base_url IN ? AND type = ?", []string{branchMainURL, branchMainURL + "/"}, 1).Where("tag IS NULL OR tag NOT LIKE ?", "branch-group-%").Order("id ASC").Find(&channels).Error; err != nil {
+	if err := model.DB.Select("id", "name", "base_url", "type", "models", "status", "key", "channel_info", "group", "tag", "setting").Where("base_url IN ? AND type = ?", []string{branchMainURL, branchMainURL + "/"}, 1).Where("tag IS NULL OR (tag NOT LIKE ? AND tag NOT LIKE ?)", "branch-group-%", "branch-retired-%").Order("id ASC").Find(&channels).Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -100,9 +138,38 @@ func GetBranchCatalogChannels(c *gin.Context) {
 		if channel.ChannelInfo.IsMultiKey {
 			continue
 		}
-		result = append(result, gin.H{"id": channel.Id, "name": channel.Name, "status": channel.Status, "configured": strings.TrimSpace(channel.Key) != ""})
+		result = append(result, gin.H{"id": channel.Id, "name": channel.Name, "status": channel.Status, "configured": strings.TrimSpace(channel.Key) != "", "key_preview": branchCatalogKeyPreview(channel.Key), "bound_group": model.BranchCatalogBoundGroup(&channel), "bound_groups": model.BranchCatalogBoundGroups(&channel), "is_source": model.IsBranchCatalogSource(&channel), "channel_version": model.BranchCatalogSourceVersion(&channel)})
 	}
 	common.ApiSuccess(c, gin.H{"main_url": branchMainURL, "channels": result, "can_configure": authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite)})
+}
+
+func DeleteBranchCatalogSource(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	if !authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
+		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "需要渠道敏感配置权限才能删除主站令牌绑定"})
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2048)
+	var request struct {
+		ChannelID      int    `json:"channel_id"`
+		ChannelVersion string `json:"channel_version"`
+	}
+	if c.ShouldBindJSON(&request) != nil || request.ChannelID <= 0 || len(request.ChannelVersion) != 64 {
+		common.ApiErrorMsg(c, "删除参数无效，请刷新令牌列表后重新确认")
+		return
+	}
+	disabled, err := model.DeleteBranchCatalogSource(request.ChannelID, request.ChannelVersion)
+	if err != nil {
+		if errors.Is(err, model.ErrBranchCatalogDeleteConflict) {
+			common.ApiErrorMsg(c, err.Error())
+		} else {
+			common.ApiErrorMsg(c, "删除令牌绑定失败，请稍后重试")
+		}
+		return
+	}
+	model.InitChannelCache()
+	recordManageAudit(c, "branch.catalog.source.delete", map[string]any{"channel_id": request.ChannelID, "disabled_channels": disabled})
+	common.ApiSuccess(c, gin.H{"channel_id": request.ChannelID, "disabled_channels": disabled})
 }
 
 // ConfigureBranchCatalog never returns or audits the submitted credential.
@@ -112,10 +179,12 @@ func ConfigureBranchCatalog(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"success": false, "message": "需要渠道敏感配置权限才能保存主站 API Key"})
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 8192)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16384)
 	var request struct {
-		ChannelID int    `json:"channel_id"`
-		APIKey    string `json:"api_key"`
+		ChannelID int      `json:"channel_id"`
+		APIKey    string   `json:"api_key"`
+		Group     string   `json:"group"`
+		Groups    []string `json:"groups"`
 	}
 	if c.ShouldBindJSON(&request) != nil || request.ChannelID < 0 {
 		common.ApiErrorMsg(c, "主站 API Key 参数无效")
@@ -127,18 +196,69 @@ func ConfigureBranchCatalog(c *gin.Context) {
 		return
 	}
 	// Validate the fixed HTTPS catalog before changing working credentials.
-	if _, err := requestBranchCatalog(c.Request.Context(), key); err != nil {
+	catalog, err := requestBranchCatalog(c.Request.Context(), key)
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	id, err := model.SaveBranchCatalogKey(request.ChannelID, key)
+	groups, err := verifiedBranchTokenGroups(key)
 	if err != nil {
-		common.ApiErrorMsg(c, "保存主站 API Key 失败，请刷新后检查渠道配置")
+		common.ApiError(c, err)
+		return
+	}
+	if len(groups) == 0 {
+		common.ApiErrorMsg(c, "此主站令牌没有已核验的绑定分组，不能新增同步来源")
+		return
+	}
+	if request.Groups != nil || request.Group != "" {
+		selected := request.Groups
+		if selected == nil {
+			selected = []string{request.Group}
+		}
+		selected, selectionErr := model.NormalizeBranchCatalogGroups(selected)
+		if selectionErr != nil || request.Groups != nil && request.Group != "" || !slices.Equal(selected, groups) {
+			common.ApiErrorMsg(c, "提交的分组与主站已核验绑定不一致，未保存")
+			return
+		}
+	}
+	filterBranchCatalogGroups(catalog, groups)
+	savedGroups := groups
+	if request.ChannelID > 0 {
+		previous, lookupErr := model.GetChannelById(request.ChannelID, true)
+		if lookupErr != nil || !model.IsBranchCatalogSource(previous) {
+			common.ApiErrorMsg(c, "令牌来源已变化，请刷新后重试")
+			return
+		}
+		if len(model.BranchCatalogBoundGroups(previous)) > 0 {
+			savedGroups = model.BranchCatalogBoundGroups(previous)
+		}
+	}
+	id, err := model.SaveBranchCatalogGroupsKey(request.ChannelID, savedGroups, key)
+	if err != nil {
+		common.ApiErrorMsg(c, branchCatalogSaveErrorMessage(key, err))
+		return
+	}
+	channel, err := model.GetChannelById(id, true)
+	if err == nil {
+		_, err = model.ReconcileBranchCatalogSource(channel, branchCatalogScopes(catalog), groups)
+	}
+	if err != nil {
+		common.ApiErrorMsg(c, "令牌已保存，但模型范围刷新失败，请重新拉取")
+		return
+	}
+	if err := markBranchCatalogConflicts(catalog, id); err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	model.InitChannelCache()
-	recordManageAudit(c, "branch.catalog.configure", map[string]any{"channel_id": id})
-	common.ApiSuccess(c, gin.H{"channel_id": id})
+	recordManageAudit(c, "branch.catalog.configure", map[string]any{"channel_id": id, "groups": groups})
+	conflicts := make([]gin.H, 0)
+	for _, item := range catalog.Models {
+		if len(item.DuplicateSources) > 0 {
+			conflicts = append(conflicts, gin.H{"model_name": item.ModelName, "groups": branchConflictGroups(item), "duplicate_sources": item.DuplicateSources})
+		}
+	}
+	common.ApiSuccess(c, gin.H{"channel_id": id, "groups": groups, "conflicts": conflicts})
 }
 
 func fetchBranchCatalog(c *gin.Context, channelID int) (*model.Channel, *branchCatalog, error) {
@@ -150,7 +270,132 @@ func fetchBranchCatalog(c *gin.Context, channelID int) (*model.Channel, *branchC
 		return nil, nil, errors.New("请选择使用单个令牌的 AICost 主站渠道")
 	}
 	catalog, err := requestBranchCatalog(c.Request.Context(), channel.Key)
+	var groups []string
+	if err == nil {
+		groups, err = verifiedBranchTokenGroups(channel.Key)
+		if err == nil {
+			filterBranchCatalogGroups(catalog, groups)
+		}
+	}
+	if err == nil && model.IsBranchCatalogSource(channel) {
+		_, err = model.ReconcileBranchCatalogSource(channel, branchCatalogScopes(catalog), groups)
+		if err == nil {
+			err = markBranchCatalogConflicts(catalog, channel.Id)
+			model.InitChannelCache()
+			model.RefreshPricing()
+		}
+	}
 	return channel, catalog, err
+}
+
+func branchCatalogScopes(catalog *branchCatalog) []model.BranchCatalogModelScope {
+	scopes := make([]model.BranchCatalogModelScope, 0, len(catalog.Models))
+	for _, item := range catalog.Models {
+		groups := make([]string, 0, len(item.GroupRatios))
+		for group := range item.GroupRatios {
+			groups = append(groups, group)
+		}
+		slices.Sort(groups)
+		scopes = append(scopes, model.BranchCatalogModelScope{ModelName: item.ModelName, Groups: groups, Video: item.ModelType == "video"})
+	}
+	slices.SortFunc(scopes, func(a, b model.BranchCatalogModelScope) int { return strings.Compare(a.ModelName, b.ModelName) })
+	return scopes
+}
+
+// Include saved token rows because prices are global, not per credential.
+func markBranchCatalogConflicts(catalog *branchCatalog, sourceID int) error {
+	var sources []model.Channel
+	if err := model.DB.Select("id", "key", "group", "tag", "setting").Where("base_url IN ? AND type = ? AND tag LIKE ?", []string{branchMainURL, branchMainURL + "/"}, 1, "branch-source-%").Order("id ASC").Find(&sources).Error; err != nil {
+		return err
+	}
+	for index := range catalog.Models {
+		item := &catalog.Models[index]
+		item.DuplicateSources, item.ConflictingGroups = nil, nil
+		for _, source := range sources {
+			if source.Id == sourceID {
+				continue
+			}
+			for _, saved := range model.BranchCatalogSavedModels(&source) {
+				if saved.ModelName == item.ModelName {
+					var overlap []string
+					for _, group := range saved.Groups {
+						if _, ok := item.GroupRatios[group]; ok {
+							overlap = append(overlap, group)
+						}
+					}
+					if len(overlap) > 0 {
+						item.DuplicateSources = append(item.DuplicateSources, branchDuplicateSource{ChannelID: source.Id, KeyPreview: branchCatalogKeyPreview(source.Key), Groups: overlap})
+					}
+				}
+			}
+		}
+		if len(item.DuplicateSources) > 0 {
+			var groups []string
+			for _, duplicate := range item.DuplicateSources {
+				groups = append(groups, duplicate.Groups...)
+			}
+			slices.Sort(groups)
+			item.ConflictingGroups = slices.Compact(groups)
+		}
+	}
+	return nil
+}
+
+// The main catalog can include account-visible groups beyond the token's group.
+// Never treat its group list as proof of the token's actual group bindings.
+func scopeBranchCatalogGroup(catalog *branchCatalog, group string) error {
+	return scopeBranchCatalogGroups(catalog, []string{group})
+}
+
+func scopeBranchCatalogGroups(catalog *branchCatalog, selected []string) error {
+	selected, err := model.NormalizeBranchCatalogGroups(selected)
+	if err != nil {
+		return err
+	}
+	available := catalog.GroupRatio
+	for _, group := range selected {
+		if _, ok := available[group]; !ok && !slices.ContainsFunc(catalog.Models, func(item branchCatalogItem) bool { _, ok := item.GroupRatios[group]; return ok }) {
+			return fmt.Errorf("主站目录中没有分组 %s 的可同步模型，请核对令牌和分组名称", group)
+		}
+	}
+	filterBranchCatalogGroups(catalog, selected)
+	return nil
+}
+
+func filterBranchCatalogGroups(catalog *branchCatalog, selected []string) {
+	models := make([]branchCatalogItem, 0, len(catalog.Models))
+	groups := map[string]float64{}
+	for _, item := range catalog.Models {
+		matched := map[string]float64{}
+		for _, group := range selected {
+			if ratio, ok := item.GroupRatios[group]; ok {
+				matched[group] = ratio
+				groups[group] = ratio
+			}
+		}
+		if len(matched) > 0 {
+			item.GroupRatios = matched
+			item.EnableGroup = nil
+			for _, group := range selected {
+				if _, ok := matched[group]; ok {
+					item.EnableGroup = append(item.EnableGroup, group)
+				}
+			}
+			models = append(models, item)
+		}
+	}
+	catalog.Models, catalog.GroupRatio = models, groups
+}
+
+func branchConflictGroups(item branchCatalogItem) []string {
+	return slices.Clone(item.ConflictingGroups)
+}
+
+func branchConflictMessage(item branchCatalogItem) string {
+	if names := branchConflictGroups(item); len(names) > 0 {
+		return fmt.Sprintf("模型 %s 在同一分组内被多个令牌重复同步；分组：%s", item.ModelName, strings.Join(names, "、"))
+	}
+	return ""
 }
 
 func requestBranchCatalog(ctx context.Context, key string) (*branchCatalog, error) {
@@ -172,9 +417,44 @@ func requestBranchCatalog(ctx context.Context, key string) (*branchCatalog, erro
 		Success bool          `json:"success"`
 		Data    branchCatalog `json:"data"`
 	}
-	if err := common.DecodeJson(io.LimitReader(response.Body, 16<<20), &envelope); err != nil || !envelope.Success || envelope.Data.Version == "" {
+	if err := common.DecodeJson(io.LimitReader(response.Body, 16<<20), &envelope); err != nil || !envelope.Success || envelope.Data.Version == "" || envelope.Data.Models == nil {
 		return nil, errors.New("主站目录格式无效")
 	}
+	// The distributor directory is account-wide; the token's model list bounds
+	// which entries can contribute groups or conflicts to this sync source.
+	modelsRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, branchMainURL+"/v1/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	modelsRequest.Header.Set("Authorization", "Bearer "+key)
+	modelsRequest.Header.Set("Cache-Control", "no-cache")
+	modelsResponse, err := client.Do(modelsRequest)
+	if err != nil {
+		return nil, errors.New("无法查询主站令牌的可用模型，请稍后重试")
+	}
+	defer modelsResponse.Body.Close()
+	if modelsResponse.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("主站可用模型接口返回 HTTP %d，未保存或同步配置", modelsResponse.StatusCode)
+	}
+	var modelsEnvelope struct {
+		Object string `json:"object"`
+		Data   []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := common.DecodeJson(io.LimitReader(modelsResponse.Body, 16<<20), &modelsEnvelope); err != nil || modelsEnvelope.Object != "list" || modelsEnvelope.Data == nil {
+		return nil, errors.New("主站可用模型列表格式无效，未保存或同步配置")
+	}
+	allowedModels := make(map[string]bool, len(modelsEnvelope.Data))
+	for _, item := range modelsEnvelope.Data {
+		if strings.TrimSpace(item.ID) == "" {
+			return nil, errors.New("主站模型名称无效，未清理本地路由")
+		}
+		allowedModels[item.ID] = true
+	}
+	envelope.Data.Models = slices.DeleteFunc(envelope.Data.Models, func(item branchCatalogItem) bool {
+		return !allowedModels[item.ModelName]
+	})
 	if err := scopeBranchCatalog(&envelope.Data); err != nil {
 		return nil, err
 	}
@@ -237,7 +517,7 @@ func videoBillingExpression(unit string, price float64) (string, error) {
 
 func branchChannelVersion(channel *model.Channel) string {
 	// Bind previews to credentials and routing configuration without exposing either.
-	raw, _ := common.Marshal([]any{channel.Id, channel.Key, channel.Models, channel.Type, channel.Status, channel.Group, channel.ModelMapping, channel.Setting})
+	raw, _ := common.Marshal([]any{channel.Id, channel.Key, channel.Models, channel.Type, channel.Status, channel.Group, channel.ModelMapping, channel.Setting, channel.Tag, channel.GetBaseURL()})
 	return fmt.Sprintf("%x", sha256.Sum256(raw))
 }
 
@@ -334,6 +614,9 @@ func PreviewBranchCatalog(c *gin.Context) {
 		if err != nil {
 			row.Blocked = err.Error()
 		}
+		if len(model.BranchCatalogBoundGroups(channel)) > 0 {
+			row.ConflictingGroups = branchConflictGroups(item)
+		}
 		rows = append(rows, row)
 	}
 	version, err := branchCatalogVersion(catalog)
@@ -341,7 +624,7 @@ func PreviewBranchCatalog(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	common.ApiSuccess(c, gin.H{"catalog_version": version, "channel_version": branchChannelVersion(channel), "models": rows, "group_ratio": catalog.GroupRatio})
+	common.ApiSuccess(c, gin.H{"catalog_version": version, "channel_version": branchChannelVersion(channel), "models": rows, "group_ratio": catalog.GroupRatio, "bound_groups": model.BranchCatalogBoundGroups(channel)})
 }
 
 func ApplyBranchCatalog(c *gin.Context) {
@@ -373,6 +656,10 @@ func ApplyBranchCatalog(c *gin.Context) {
 	channel, catalog, err := fetchBranchCatalog(c, request.ChannelID)
 	if err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	if model.BranchCatalogBoundGroup(channel) == "" {
+		common.ApiErrorMsg(c, "请先配置主站令牌及其分组，不能使用未绑定来源同步")
 		return
 	}
 	version, err := branchCatalogVersion(catalog)
@@ -416,7 +703,7 @@ func ApplyBranchCatalog(c *gin.Context) {
 			usedGroups[name] = true
 		}
 		endpoints, _ := common.Marshal(item.SupportedEndpointTypes)
-		imports = append(imports, model.BranchModelImport{Change: model.ModelPricingChange{ModelName: item.ModelName, ExpectedVersion: selection.ExpectedVersion, Pricing: pricing}, UpdatePrice: selection.UpdatePrice || priceMultiplier != 1, Video: item.ModelType == "video", Groups: selection.Groups, Metadata: model.Model{ModelName: item.ModelName, Description: item.Description, Icon: item.Icon, Tags: item.Tags, Endpoints: string(endpoints)}})
+		imports = append(imports, model.BranchModelImport{Change: model.ModelPricingChange{ModelName: item.ModelName, ExpectedVersion: selection.ExpectedVersion, Pricing: pricing}, UpdatePrice: selection.UpdatePrice || request.PriceMultiplier != nil, Video: item.ModelType == "video", Groups: selection.Groups, Metadata: model.Model{ModelName: item.ModelName, Description: item.Description, Icon: item.Icon, Tags: item.Tags, Endpoints: string(endpoints)}})
 	}
 	if len(request.Groups) != len(usedGroups) {
 		common.ApiErrorMsg(c, "所选分组确认信息不完整")
@@ -436,5 +723,11 @@ func ApplyBranchCatalog(c *gin.Context) {
 	}
 	model.InitChannelCache()
 	recordManageAudit(c, "branch.catalog.sync", map[string]any{"channel_id": channel.Id, "count": len(imports), "catalog_version": catalog.Version, "price_multiplier": priceMultiplier})
-	common.ApiSuccess(c, gin.H{"count": len(imports)})
+	versions := make(map[string]string, len(imports))
+	for _, item := range imports {
+		if item.UpdatePrice {
+			versions[item.Change.ModelName] = model.ModelPricingVersion(item.Change.Pricing)
+		}
+	}
+	common.ApiSuccess(c, gin.H{"count": len(imports), "pricing_versions": versions})
 }

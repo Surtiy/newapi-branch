@@ -80,6 +80,24 @@ afterEach(() => {
 })
 
 describe('model cards', () => {
+  it('displays scaled imported prices instead of raw billing code', () => {
+    render(
+      <ModelCard
+        model={pricingModel({
+          billing_mode: 'tiered_expr',
+          billing_expr:
+            '((len <= 272000 ? tier("base", p * 5 + c * 30) : tier("long", p * 10 + c * 45)) * (param("service_tier") == "priority" ? 2.5 : 1)) * 1.2',
+        })}
+        onClick={vi.fn()}
+        tokenUnit='M'
+      />
+    )
+    expect(
+      screen.queryByText('Special billing expression')
+    ).not.toBeInTheDocument()
+    expect(screen.getByText('$6')).toBeVisible()
+    expect(screen.getByText('$36')).toBeVisible()
+  })
   it('copies the complete long model name without opening details', async () => {
     const user = userEvent.setup()
     const onClick = vi.fn()

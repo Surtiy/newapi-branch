@@ -226,6 +226,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			branchCatalogRoute.GET("/branch_catalog", controller.GetBranchCatalogChannels)
 			branchCatalogRoute.POST("/branch_catalog/config", controller.ConfigureBranchCatalog)
+			branchCatalogRoute.POST("/branch_catalog/delete", controller.DeleteBranchCatalogSource)
 			branchCatalogRoute.POST("/branch_catalog/preview", controller.PreviewBranchCatalog)
 			branchCatalogRoute.POST("/branch_catalog/apply", controller.ApplyBranchCatalog)
 		}

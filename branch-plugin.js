@@ -1,5 +1,5 @@
 export const meta = {
-  apiVersion: 1, key: 'aicost-branch', name: 'AICost 主站视频', version: '1.0.0',
+  apiVersion: 1, key: 'aicost-branch', name: 'AICost 主站视频', version: '1.0.1',
   author: { name: 'AICost' }, models: ['aicost-branch-video'], fetchMode: 'per_task',
   usageSchema: { seconds: { type: 'number', unit: 'second' } },
   protocols: ['openai_video'],
@@ -35,12 +35,22 @@ export function buildQueryRequest(ctx) {
 
 function videoURL(body) {
   if (!body) return '';
+  const url = (body.video && body.video.url) || body.result_url || body.video_url || body.url || (body.urls || [])[0];
+  if (url) return url;
   if (body.data && typeof body.data === 'object' && !Array.isArray(body.data)) return videoURL(body.data);
-  return (body.video && body.video.url) || body.video_url || body.url || (body.urls || [])[0] || '';
+  return '';
+}
+
+function taskBody(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  // Common query responses keep status outside data, which may be request metadata.
+  if (typeof raw.status === 'string' && raw.status.trim()) return raw;
+  if (raw.data && typeof raw.data === 'object' && !Array.isArray(raw.data)) return taskBody(raw.data);
+  return raw;
 }
 
 export function parseTaskResult(_ctx, raw) {
-  const body = raw.data || raw;
+  const body = taskBody(raw);
   const status = String(body.status || '').toLowerCase();
   if (['completed', 'succeeded', 'success'].includes(status)) {
     const url = videoURL(body);
@@ -64,8 +74,9 @@ export function extractUsage(ctx) {
 }
 
 export function extractUsageOnComplete(_task, _result, raw) {
-  const body = raw.data || raw;
-  const seconds = Number(body.seconds || body.duration);
+  const body = taskBody(raw);
+  const data = body.data && typeof body.data === 'object' ? body.data : {};
+  const seconds = Number(body.seconds || body.duration || data.seconds || data.duration);
   return Number.isFinite(seconds) && seconds > 0 ? { seconds } : {};
 }
 

@@ -1,5 +1,27 @@
 {
   "translation": {
+    "Delete API key": "Delete API key",
+    "Delete API key {{index}}": "Delete API key {{index}}",
+    "API key binding deleted": "API key binding deleted",
+    "Remove this branch binding and disable its synced channels. Existing tasks, history and prices are retained. The main site API key is not revoked.": "Remove this branch binding and disable its synced channels. Existing tasks, history and prices are retained. The main site API key is not revoked.",
+    "AICost API key list": "AICost API key list",
+    "Main site groups": "Main site groups",
+    "Group names, separated by commas": "Group names, separated by commas",
+    "Sync API key": "Sync API key",
+    "Model group conflicts": "Model group conflicts (excluded from sync)",
+    "Confirm this key belongs to these main site groups: {{group}}. The catalog cannot verify token bindings. Models available in multiple selected groups will be flagged and excluded from sync. Existing synced channels in these groups will use this key.": "Confirm this key belongs to these main site groups: {{group}}. The catalog cannot verify token bindings. Models available in multiple selected groups will be flagged and excluded from sync. Existing synced channels in these groups will use this key.",
+    "New API key {{index}}": "New API key {{index}}",
+    "Remove unsaved API key": "Remove unsaved API key",
+    "Sync group": "Sync group",
+    "No saved group API keys": "No saved group API keys",
+    "Main site group": "Main site group",
+    "Unbound": "Unbound",
+    "Add group API key": "Add group API key",
+    "Confirm group API key": "Confirm group API key",
+    "This main site key must be bound only to {{group}} with cross-group retry disabled. The catalog cannot verify the token group. Existing synced channels in this group will use this key.": "This main site key must be bound only to {{group}} with cross-group retry disabled. The catalog cannot verify the token group. Existing synced channels in this group will use this key.",
+    "Every selected model price is updated using this multiplier, including 1.": "Every selected model price is updated using this multiplier, including 1.",
+    "Manual sync only. Fetch to preview; select models and confirm before applying.": "Manual sync only. Fetch to preview; select models and confirm before applying.",
+    "Models are unselected by default; unselected models are not synced or changed.": "Models are unselected by default; unselected models are not synced or changed.",
     "Main site": "Main site",
     "Main site API key": "Main site API key",
     "Configured; enter a new key to replace": "Configured; enter a new key to replace",
@@ -6168,6 +6190,12 @@
     "Zoom": "Zoom",
     "Per second": "Per second",
     "Billing unit": "Billing unit",
-    "Main site models or groups changed. Please sync.": "Main site models or groups changed. Please sync."
+    "Main site models or groups changed. Please sync.": "Main site models or groups changed. Please sync.",
+    "Directory-associated groups": "Directory-associated groups",
+    "Duplicate model names in the same group": "Duplicate model names in the same group",
+    "Model pricing changed. Fetch it again before syncing.": "Model pricing changed. Fetch it again before syncing.",
+    "Duplicate model names": "Duplicate model names",
+    "Update multiplier for {{group}}": "Update multiplier for {{group}}",
+    "Main site catalog changed. Fetch it again before syncing.": "Main site catalog changed. Fetch it again before syncing."
   }
 }

@@ -643,21 +643,35 @@ export function normalizeTierLabel(label: string | undefined): string {
 // ---------------------------------------------------------------------------
 
 function splitTopLevelMultiply(expr: string): string[] {
+  if (findTaskTopLevelCharacter(expr, '?') >= 0) return [expr]
   const parts: string[] = []
   let start = 0
   let depth = 0
+  let quoted = false
+  let escaped = false
   for (let index = 0; index < expr.length; index += 1) {
     const char = expr[index]
+    if (quoted) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') quoted = false
+      continue
+    }
+    if (char === '"') {
+      quoted = true
+      continue
+    }
     if (char === '(') depth += 1
     if (char === ')') depth -= 1
-    if (depth === 0 && expr.slice(index, index + 3) === ' * ') {
+    if (depth < 0) return [expr]
+    if (depth === 0 && char === '*') {
       parts.push(expr.slice(start, index).trim())
-      start = index + 3
-      index += 2
+      start = index + 1
     }
   }
   parts.push(expr.slice(start).trim())
-  return parts.filter(Boolean)
+  if (depth !== 0 || quoted || parts.some((part) => !part)) return [expr]
+  return parts
 }
 
 function splitTopLevelAnd(expr: string): string[] {
@@ -917,12 +931,24 @@ export function tryParseRequestRuleExpr(
 function hasFullOuterParens(expr: string): boolean {
   if (!expr.startsWith('(') || !expr.endsWith(')')) return false
   let depth = 0
+  let quoted = false
+  let escaped = false
   for (let i = 0; i < expr.length; i += 1) {
+    if (quoted) {
+      if (escaped) escaped = false
+      else if (expr[i] === '\\') escaped = true
+      else if (expr[i] === '"') quoted = false
+      continue
+    }
+    if (expr[i] === '"') {
+      quoted = true
+      continue
+    }
     if (expr[i] === '(') depth += 1
     if (expr[i] === ')') depth -= 1
     if (depth === 0 && i < expr.length - 1) return false
   }
-  return depth === 0
+  return depth === 0 && !quoted
 }
 
 function unwrapOuterParens(expr: string): string {
@@ -939,28 +965,69 @@ export function splitBillingExprAndRequestRules(expr: string): {
 } {
   const trimmed = (expr || '').trim()
   if (!trimmed) return { billingExpr: '', requestRuleExpr: '' }
-
-  const parts = splitTopLevelMultiply(trimmed)
-  if (parts.length <= 1) return { billingExpr: trimmed, requestRuleExpr: '' }
-
+  const unchanged = { billingExpr: trimmed, requestRuleExpr: '' }
+  const versionPrefix = trimmed.match(/^v\d+:/)?.[0] || ''
+  const pending = [trimmed.slice(versionPrefix.length)]
   const ruleParts: string[] = []
   const baseParts: string[] = []
+  let multiplier = 1
+  let hasMultiplier = false
+  let visited = 0
 
-  parts.forEach((part) => {
-    const parsed = tryParseRequestRuleExpr(part)
-    if (parsed && parsed.length > 0) {
-      ruleParts.push(part)
-    } else {
-      baseParts.push(part)
+  // Imported markups can wrap the whole tier-and-request-rule expression.
+  // Flatten only multiplication factors, never a conditional's branches.
+  while (pending.length > 0) {
+    if (++visited > 256) return unchanged
+    const part = pending.pop() || ''
+    const unwrapped = unwrapOuterParens(part)
+    const factors = splitTopLevelMultiply(unwrapped)
+    if (factors.length > 1) {
+      pending.push(...factors.reverse())
+      continue
     }
-  })
+    if (NUMERIC_LITERAL_REGEX.test(unwrapped)) {
+      const value = Number(unwrapped)
+      if (!Number.isFinite(value) || value < 0) return unchanged
+      multiplier *= value
+      if (!Number.isFinite(multiplier)) return unchanged
+      hasMultiplier = true
+      continue
+    }
+    const parsed = tryParseRequestRuleExpr(`(${unwrapped})`)
+    if (parsed && parsed.length > 0) {
+      ruleParts.push(`(${unwrapped})`)
+    } else {
+      baseParts.push(unwrapped)
+    }
+  }
 
-  if (ruleParts.length === 0 || baseParts.length !== 1) {
-    return { billingExpr: trimmed, requestRuleExpr: '' }
+  if (baseParts.length !== 1) return unchanged
+  if (!hasMultiplier && ruleParts.length === 0) return unchanged
+  let billingExpr = baseParts[0]
+  if (hasMultiplier) {
+    const tiers = parseTiersFromExpr(billingExpr)
+    if (tiers.length === 0) return unchanged
+    const scaledTiers: string[] = []
+    for (const tier of tiers) {
+      const prices: string[] = []
+      for (const variable of BILLING_PRICING_VARS) {
+        const value = tier[variable.field || '']
+        if (typeof value !== 'number') continue
+        const scaled = value * multiplier
+        if (!Number.isFinite(scaled)) return unchanged
+        prices.push(`${variable.key} * ${Number(scaled.toPrecision(15))}`)
+      }
+      const condition = tier.conditions
+        .map((item) => `${item.var} ${item.op} ${item.value}`)
+        .join(' && ')
+      const call = `tier(${JSON.stringify(tier.label)}, ${prices.join(' + ')})`
+      scaledTiers.push(condition ? `${condition} ? ${call}` : call)
+    }
+    billingExpr = scaledTiers.join(' : ')
   }
 
   return {
-    billingExpr: unwrapOuterParens(baseParts[0]),
+    billingExpr: versionPrefix + billingExpr,
     requestRuleExpr: ruleParts.join(' * '),
   }
 }

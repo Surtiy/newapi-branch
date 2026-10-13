@@ -45,6 +45,8 @@ import {
   useSystemConfigStore,
 } from '@/stores/system-config-store'
 
+import { pricingRow } from '../pricing'
+
 const clients: QueryClient[] = []
 
 beforeEach(() => {
@@ -123,6 +125,28 @@ async function commit(
   })
   return result as ModelRatioData | null
 }
+
+it('fills imported scaled prices into the visual editor without changing priority multipliers', async () => {
+  const row = pricingRow('gpt-5.5', {
+    'billing_setting.billing_mode': 'tiered_expr',
+    'billing_setting.billing_expr':
+      '((len <= 272000 ? tier("base", p * 5 + c * 30 + cr * 0.5) : tier("long", p * 10 + c * 45 + cr * 1)) * (param("service_tier") == "priority" ? 2.5 : 1)) * 1.2',
+  })
+  const editor = renderEditor(row)
+  expect(await screen.findByText('Visual editor')).toBeVisible()
+  const prices = screen.getAllByRole('textbox', { name: 'Input price' })
+  expect(prices[0]).toHaveValue('6')
+  expect(prices[1]).toHaveValue('12')
+  fireEvent.change(prices[0], { target: { value: '7' } })
+  const draft = await commit(editor.ref)
+  expect(
+    tryParseVisualConfig(draft?.billingExpr)?.tiers[0].input_unit_cost
+  ).toBe(7)
+  expect(draft?.requestRuleExpr).toBe(row.requestRuleExpr)
+  expect(tryParseVisualConfig(draft?.billingExpr)?.tiers[0].conditions).toEqual(
+    [{ var: 'len', op: '<=', value: 272000 }]
+  )
+})
 
 it('defaults to USD, remembers a currency choice and restores it when reopened', async () => {
   const editor = renderEditor()

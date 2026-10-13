@@ -109,6 +109,18 @@ func ImportBranchModels(expected *Channel, imports []BranchModelImport, groups .
 	if len(imports) == 0 {
 		return errors.New("请选择需要同步的模型")
 	}
+	if bound := BranchCatalogBoundGroups(expected); len(bound) > 0 {
+		for _, group := range groups {
+			if !slices.Contains(bound, group.Name) {
+				return errors.New("同步分组与主站令牌绑定分组不一致")
+			}
+		}
+		for _, item := range imports {
+			if len(item.Groups) == 0 || slices.ContainsFunc(item.Groups, func(group string) bool { return !slices.Contains(bound, group) }) {
+				return errors.New("模型分组与主站令牌绑定分组不一致")
+			}
+		}
+	}
 	seen := make(map[string]bool)
 	for _, item := range imports {
 		name := item.Change.ModelName
@@ -126,12 +138,13 @@ func ImportBranchModels(expected *Channel, imports []BranchModelImport, groups .
 	grouped := len(groups) > 0
 	var committedGroups map[string]string
 	err := mutateModelPricingOptions(func(tx *gorm.DB, values map[string]map[string]any) error {
+		tx = tx.Session(&gorm.Session{Logger: logger.Default.LogMode(logger.Silent)})
 		var channel Channel
 		if err := lockForUpdate(tx).First(&channel, expected.Id).Error; err != nil {
 			return err
 		}
 		// Compare only editable routing fields; runtime quota counters may advance.
-		if channel.Models != expected.Models || channel.Key != expected.Key || channel.Type != expected.Type || channel.Status != expected.Status || channel.Group != expected.Group || channel.GetBaseURL() != expected.GetBaseURL() || channel.GetModelMapping() != expected.GetModelMapping() {
+		if BranchCatalogSourceVersion(&channel) != BranchCatalogSourceVersion(expected) || channel.GetModelMapping() != expected.GetModelMapping() {
 			return errors.New("渠道配置已变化，请重新拉取")
 		}
 		if grouped {

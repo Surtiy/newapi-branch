@@ -27,9 +27,11 @@ import { formatLogQuota, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
+import { shouldLoadTaskArtifacts } from '../../lib/task-artifacts'
 import { resolveTaskDetailAccess } from '../../lib/task-details'
 import type { TaskLog } from '../../types'
 import { PluginAuthorLink } from '../plugin-author-link'
+import { TaskArtifactsPanel } from '../task-artifacts'
 
 function DetailRow(props: {
   label: React.ReactNode
@@ -114,6 +116,16 @@ export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
       bodyClassName='pr-2 sm:pr-4'
     >
       <div className='space-y-3'>
+        {shouldLoadTaskArtifacts(props.log, props.open) ? (
+          <section aria-label={t('Preview')} className='min-w-0 space-y-1.5'>
+            <Label className='text-xs font-semibold'>{t('Preview')}</Label>
+            <TaskArtifactsPanel
+              key={props.log.task_id}
+              log={props.log}
+              enabled={props.open}
+            />
+          </section>
+        ) : null}
         <DetailSection label={t('Basic Information')}>
           <DetailRow label={t('Task ID')} value={props.log.task_id} mono />
           <DetailRow label={t('Platform')} value={props.log.platform} mono />

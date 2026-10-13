@@ -68,7 +68,7 @@ describe('expression price summaries', () => {
   })
   test.each([
     'tier("custom", max(p * 2 + c * 8, 100))',
-    'tier("base", p * 2 + c * 8) * 3',
+    'tier("base", p * 2 + c * 8) * unknown',
     'param("premium") ? tier("pro", p * 4 + c * 16) : tier("base", p * 2 + c * 8)',
     'tier("overflow", p * 1e999 + c * 8)',
   ])('does not invent structured prices from %s', (expression) => {
@@ -78,6 +78,18 @@ describe('expression price summaries', () => {
     )
     expect(summary?.isSpecialExpression).toBe(true)
     expect(summary?.entries).toEqual([])
+  })
+
+  test('includes a finite outer multiplier in both displayed token prices', () => {
+    const summary = getDynamicPricingSummary(
+      pricingModel({
+        billing_mode: 'tiered_expr',
+        billing_expr: 'tier("base", p * 2 + c * 8) * 3',
+      }),
+      { tokenUnit: 'M' }
+    )
+    expect(summary?.isSpecialExpression).toBe(false)
+    expect(summary?.primaryEntries.map((entry) => entry.value)).toEqual([6, 24])
   })
 
   test('retains explicit zero token rates while omitting absent categories', () => {
