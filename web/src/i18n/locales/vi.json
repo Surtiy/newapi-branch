@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Consumed quota": "Hạn mức đã sử dụng",
+    "Refunded quota": "Hạn mức đã hoàn",
+    "Refunded to subscription": "Đã hoàn vào gói đăng ký",
     "Main site": "Trang chính",
     "Main site API key": "Khóa API trang chính",
     "Configured; enter a new key to replace": "Đã cấu hình; nhập khóa mới để thay thế",

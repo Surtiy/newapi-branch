@@ -28,6 +28,25 @@ func TestTaskModel2DtoNormalizesLegacyAction(t *testing.T) {
 	assert.Equal(t, "firstTailGenerate", task.Action)
 }
 
+func TestTaskModel2DtoSanitizesStoredRequestParamsWithoutInventingHistory(t *testing.T) {
+	task := &model.Task{}
+	require.NoError(t, common.Unmarshal([]byte(`{"prompt":"original","max_tokens":0,"face":{"enabled":false},"api_key":"CANARY","images":["https://cdn.example/a?signature=CANARY&size=2"]}`), &task.PrivateData.RequestParams))
+	original := string(task.PrivateData.RequestParams)
+	task.SetData(map[string]any{"prompt": "upstream response, not client input", "seconds": 10})
+	view := TaskModel2Dto(task)
+	assert.JSONEq(t, `{"prompt":"original","max_tokens":0,"face":{"enabled":false},"images":["https://cdn.example/a?size=2"]}`, string(view.RequestParams))
+	assert.Equal(t, original, string(task.PrivateData.RequestParams), "DTO sanitization must not mutate the database row")
+	assert.NotContains(t, string(view.RequestParams), "CANARY")
+	assert.NotContains(t, string(view.RequestParams), "upstream response")
+
+	task.PrivateData.RequestParams = nil
+	assert.Empty(t, TaskModel2Dto(task).RequestParams)
+	task.PrivateData.RequestParams = []byte("null")
+	assert.Empty(t, TaskModel2Dto(task).RequestParams)
+	task.PrivateData.RequestParams = []byte(`{"prompt":`)
+	assert.Empty(t, TaskModel2Dto(task).RequestParams)
+}
+
 const mappingOrderSubmitPlugin = `
 export const meta = {apiVersion:1,key:"maporder",name:"Map Order",version:"1.0.0",author:{name:"Test"},models:["declared-model"],fetchMode:"per_task"};
 export function buildSubmitRequest(ctx) {

@@ -639,6 +639,8 @@ func TaskModel2Dto(task *model.Task) *dto.TaskDto {
 		Properties: task.Properties,
 		Username:   task.Username,
 		Data:       task.Data,
-		RequestParams: task.PrivateData.RequestParams,
+		// Re-sanitize stored snapshots at the DTO boundary, including older rows.
+		// Missing history stays empty; never infer client inputs from task.Data.
+		RequestParams: model.BuildTaskRequestParams(task.PrivateData.RequestParams, "application/json"),
 	}
 }

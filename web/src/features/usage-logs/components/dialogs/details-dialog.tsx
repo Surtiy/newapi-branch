@@ -85,6 +85,7 @@ import {
   isTimingLogType,
 } from '../../lib/utils'
 import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
+import { LogCostDisplay } from '../log-cost-display'
 import { PluginAuthorLink } from '../plugin-author-link'
 import { DetailRow, DetailSection } from './log-detail-layout'
 
@@ -357,11 +358,7 @@ function BillingBreakdown(props: {
           ))}
         </>
       )}
-      <DetailRow
-        label={t('Total Cost')}
-        value={formatLogQuota(log.quota)}
-        mono
-      />
+      <LogCostDisplay logType={log.type} quota={log.quota} other={other} />
     </DetailSection>
   )
 }
@@ -613,6 +610,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
       <div className='w-full max-w-full min-w-0 space-y-2.5 overflow-x-hidden py-1 sm:space-y-3'>
         {/* Overview section - key identifiers */}
         <div className='min-w-0 space-y-1'>
+          {(isRefund || (isConsume && (!other || isViolation))) && (
+            <LogCostDisplay
+              logType={props.log.type}
+              quota={props.log.quota}
+              other={other}
+            />
+          )}
           {props.log.request_id && (
             <DetailRow
               label={t('Request ID')}

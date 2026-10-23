@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Consumed quota": "Consumed quota",
+    "Refunded quota": "Refunded quota",
+    "Refunded to subscription": "Refunded to subscription",
     "Review candidate directory groups": "Review candidate directory groups",
     "The main site catalog does not identify actual token bindings. Check these candidate groups against your token settings before syncing prices.": "The main site catalog does not identify actual token bindings. Check these candidate groups against your token settings before syncing prices.",
     "{{model}} · {{key}}: {{groups}}": "{{model}} · {{key}}: {{groups}}",
@@ -6199,6 +6202,9 @@
     "Model pricing changed. Fetch it again before syncing.": "Model pricing changed. Fetch it again before syncing.",
     "Duplicate model names": "Duplicate model names",
     "Update multiplier for {{group}}": "Update multiplier for {{group}}",
-    "Main site catalog changed. Fetch it again before syncing.": "Main site catalog changed. Fetch it again before syncing."
+    "Main site catalog changed. Fetch it again before syncing.": "Main site catalog changed. Fetch it again before syncing.",
+    "Copy request parameters": "Copy request parameters",
+    "No saved request parameters for this task.": "No saved request parameters for this task.",
+    "Saved request snapshot. Credentials and file contents are omitted; large values may be shortened.": "Saved request snapshot. Credentials and file contents are omitted; large values may be shortened."
   }
 }

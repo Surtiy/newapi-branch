@@ -1,14 +1,19 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { createInstance } from 'i18next'
 import { I18nextProvider } from 'react-i18next'
-import { afterEach, beforeEach, expect, test } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import en from '@/i18n/locales/en.json'
 
 import type { TaskArtifactProjection, TaskLog } from '../../types'
 import { TaskDetailsDialog } from '../dialogs/task-details-dialog'
 import { TaskArtifactsCell } from '../task-artifacts'
+import { TaskDetailsCell } from '../task-details-cell'
+
+// Provider brand icons are unrelated to task row actions or media playback.
+vi.mock('@lobehub/icons', () => ({}))
 
 const task: TaskLog = {
   id: 1,
@@ -136,4 +141,103 @@ test('artifact action uses the same player and public download URL', async () =>
   expect(
     within(dialog).getByRole('button', { name: 'Download' })
   ).toHaveAttribute('href', mediaUrl)
+})
+
+test('task details preview every image and video in a mixed result', async () => {
+  const imageUrl = mediaUrl.replace('/video/', '/image-1/')
+  renderDetails(task, {
+    artifacts: [
+      {
+        key: 'image-1',
+        type: 'image',
+        mime_type: 'image/png',
+        content_url: imageUrl,
+      },
+      ...video.artifacts,
+    ],
+  })
+  const dialog = await screen.findByRole('dialog')
+  expect(within(dialog).getByRole('img', { name: 'image-1' })).toHaveAttribute(
+    'src',
+    imageUrl
+  )
+  expect(dialog.querySelector('video')).toHaveAttribute('src', mediaUrl)
+  expect(
+    within(dialog).getAllByRole('button', { name: 'Download' })
+  ).toHaveLength(2)
+})
+
+test('task parameters show the saved prompt, image references and explicit zero values', async () => {
+  const params = {
+    model: 'public-video',
+    prompt: 'A quiet street, camera moves slowly.\nKeep the original lighting.',
+    image_urls: [
+      'https://media.example/first.png',
+      'https://media.example/last.png',
+    ],
+    seconds: 8,
+    seed: 0,
+    face: { enabled: false },
+  }
+  renderDetails({ ...task, request_params: params })
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('tab', { name: 'Request Parameters' }))
+  const panel = screen.getByRole('tabpanel', { name: 'Request Parameters' })
+  expect(panel.querySelector('pre')?.textContent).toBe(
+    JSON.stringify(params, null, 2)
+  )
+  expect(
+    within(panel).getByRole('button', { name: 'Copy request parameters' })
+  ).toBeVisible()
+  expect(
+    screen.queryByRole('region', { name: 'Preview' })
+  ).not.toBeInTheDocument()
+  await user.click(screen.getByRole('tab', { name: 'Overview' }))
+  expect(
+    screen.getByRole('region', { name: 'Preview' }).querySelector('video')
+  ).toHaveAttribute('src', mediaUrl)
+})
+
+test('historical tasks without a snapshot explain missing parameters instead of guessing them', async () => {
+  renderDetails({
+    ...task,
+    data: { prompt: 'untrusted response is not the request' },
+  })
+  await userEvent.click(screen.getByRole('tab', { name: 'Request Parameters' }))
+  const panel = screen.getByRole('tabpanel', { name: 'Request Parameters' })
+  expect(
+    within(panel).getByText('No saved request parameters for this task.')
+  ).toBeVisible()
+  expect(panel).not.toHaveTextContent('untrusted response')
+  expect(
+    within(panel).queryByRole('button', { name: 'Copy request parameters' })
+  ).not.toBeInTheDocument()
+})
+
+test('task row parameters action opens the saved request directly and details remains available', async () => {
+  render(
+    <I18nextProvider i18n={i18n}>
+      <QueryClientProvider client={client}>
+        <TaskDetailsCell
+          log={{
+            ...task,
+            status: 'FAILURE',
+            request_params: { prompt: 'original input', seconds: 8 },
+          }}
+          isAdmin={false}
+          isRoot={false}
+        />
+      </QueryClientProvider>
+    </I18nextProvider>
+  )
+  expect(screen.getByRole('button', { name: 'View details' })).toBeVisible()
+  await userEvent.click(
+    screen.getByRole('button', { name: 'Request Parameters' })
+  )
+  expect(
+    screen.getByRole('tab', { name: 'Request Parameters' })
+  ).toHaveAttribute('aria-selected', 'true')
+  expect(
+    screen.getByRole('tabpanel', { name: 'Request Parameters' })
+  ).toHaveTextContent('original input')
 })

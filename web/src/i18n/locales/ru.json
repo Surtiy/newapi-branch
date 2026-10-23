@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Consumed quota": "Израсходованная квота",
+    "Refunded quota": "Возвращённая квота",
+    "Refunded to subscription": "Возвращено в подписку",
     "Main site": "Основной сайт",
     "Main site API key": "API-ключ основного сайта",
     "Configured; enter a new key to replace": "Настроен; введите новый ключ для замены",

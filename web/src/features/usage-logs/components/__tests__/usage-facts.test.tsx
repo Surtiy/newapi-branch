@@ -34,7 +34,7 @@ const i18nKeys = {
   'Dynamic Pricing': 'Dynamic Pricing',
   'Matched Tier': 'Matched Tier',
   'Group Ratio': 'Group Ratio',
-  'Total Cost': 'Total Cost',
+  'Consumed quota': 'Consumed quota',
   'Usage parameters': 'Usage parameters',
 }
 
@@ -64,7 +64,10 @@ function makeLog(other: LogOtherData): UsageLog {
   }
 }
 
-function renderDetails(other: LogOtherData): QueryClient {
+function renderDetails(
+  other: LogOtherData | null,
+  overrides: Partial<UsageLog> = {}
+): QueryClient {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -79,7 +82,11 @@ function renderDetails(other: LogOtherData): QueryClient {
   render(
     <QueryClientProvider client={queryClient}>
       <DetailsDialog
-        log={makeLog(other)}
+        log={{
+          ...makeLog(other ?? {}),
+          other: other ? JSON.stringify(other) : '',
+          ...overrides,
+        }}
         isAdmin={false}
         isRoot={false}
         open
@@ -108,6 +115,42 @@ describe('usage facts billing details', () => {
     queryClients.length = 0
   })
 
+  test.each([
+    { type: 2, label: 'Consumed quota', opposite: 'Refunded quota' },
+    { type: 6, label: 'Refunded quota', opposite: 'Consumed quota' },
+  ])(
+    'shows the ledger $label in log details even without other metadata',
+    (scenario) => {
+      queryClients.push(
+        renderDetails(null, { type: scenario.type, quota: 12500 })
+      )
+      const amount = screen.getByRole('group', { name: scenario.label })
+      expect(amount.textContent?.replaceAll(/\s/g, '')).toContain('$0.025')
+      expect(screen.queryByText(scenario.opposite)).not.toBeInTheDocument()
+    }
+  )
+
+  test('shows only the recorded refund instead of reconstructing consumed or final task amounts', () => {
+    queryClients.push(
+      renderDetails(null, {
+        type: 6,
+        quota: 12500,
+        other: JSON.stringify({
+          task_id: 'task-refund',
+          pre_consumed_quota: 500000,
+          actual_quota: 250000,
+        }),
+      })
+    )
+    expect(
+      screen
+        .getByRole('group', { name: 'Refunded quota' })
+        .textContent?.replaceAll(/\s/g, '')
+    ).toContain('$0.025')
+    expect(screen.queryByText('Consumed quota')).not.toBeInTheDocument()
+    expect(screen.queryByText('Total Cost')).not.toBeInTheDocument()
+  })
+
   test('renders one raw-key row per usage fact before total cost', () => {
     const expression = 'tier("720P", u("seconds") * 5)'
     queryClients.push(
@@ -130,7 +173,7 @@ describe('usage facts billing details', () => {
     expect(rowValue('Matched Tier')).toBe('720P')
 
     const usageHeader = screen.getByText('Usage parameters')
-    const totalCost = screen.getByText('Total Cost')
+    const totalCost = screen.getByText('Consumed quota')
     expect(
       usageHeader.compareDocumentPosition(totalCost) &
         Node.DOCUMENT_POSITION_FOLLOWING
@@ -147,7 +190,7 @@ describe('usage facts billing details', () => {
     expect(screen.queryByText('Usage parameters')).toBeNull()
     expect(screen.queryByText('resolution')).toBeNull()
     expect(screen.queryByText('seconds')).toBeNull()
-    expect(screen.getByText('Total Cost')).toBeInTheDocument()
+    expect(screen.getByText('Consumed quota')).toBeInTheDocument()
   })
 
   test('does not render usage parameter rows when usage_facts is empty', () => {
@@ -161,6 +204,6 @@ describe('usage facts billing details', () => {
     expect(screen.queryByText('Usage parameters')).toBeNull()
     expect(screen.queryByText('resolution')).toBeNull()
     expect(screen.queryByText('seconds')).toBeNull()
-    expect(screen.getByText('Total Cost')).toBeInTheDocument()
+    expect(screen.getByText('Consumed quota')).toBeInTheDocument()
   })
 })

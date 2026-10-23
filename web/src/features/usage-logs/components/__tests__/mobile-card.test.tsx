@@ -170,6 +170,29 @@ it('keeps input, output and cache quantities readable without empty metric cells
   expect(screen.getByText('Cache ↑ 200')).toBeVisible()
 })
 
+it.each([
+  { type: 2, label: 'Consumed quota', opposite: 'Refunded quota' },
+  { type: 6, label: 'Refunded quota', opposite: 'Consumed quota' },
+])(
+  'shows the recorded $label in the mobile summary for type=$type',
+  (scenario) => {
+    renderLogs({
+      logs: [{ ...log, type: scenario.type, quota: 12500, other: '' }],
+    })
+    const amount = screen.getByRole('group', { name: scenario.label })
+    expect(amount.textContent?.replaceAll(/\s/g, '')).toContain('$0.025')
+    expect(screen.queryByText(scenario.opposite)).not.toBeInTheDocument()
+    expect(amount).toHaveClass('min-w-0')
+  }
+)
+
+it('omits the consumption amount when the mobile quota column is hidden', () => {
+  renderLogs({ visibility: { quota: false } })
+  expect(
+    screen.queryByRole('group', { name: 'Consumed quota' })
+  ).not.toBeInTheDocument()
+})
+
 it('shows the established empty state when no logs exist', () => {
   renderLogs({ logs: [] })
   expect(screen.getByText('No Logs Found')).toBeVisible()

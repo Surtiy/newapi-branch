@@ -20,9 +20,11 @@ import { Shield01Icon, Wrench01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useTranslation } from 'react-i18next'
 
+import { CopyButton } from '@/components/copy-button'
 import { Dialog } from '@/components/dialog'
 import { StatusBadge } from '@/components/status-badge'
 import { Label } from '@/components/ui/label'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatLogQuota, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -81,6 +83,7 @@ interface TaskDetailsDialogProps {
   isRoot: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
+  initialSection?: 'overview' | 'parameters'
 }
 
 export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
@@ -89,6 +92,10 @@ export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
   const plugin = access.plugin
   const runtime = access.runtime
   const properties = props.log.properties
+  const requestParams =
+    props.log.request_params == null
+      ? undefined
+      : JSON.stringify(props.log.request_params, null, 2)
 
   return (
     <Dialog
@@ -115,172 +122,216 @@ export function TaskDetailsDialog(props: TaskDetailsDialogProps) {
       contentHeight='min(72dvh, 720px)'
       bodyClassName='pr-2 sm:pr-4'
     >
-      <div className='space-y-3'>
-        {shouldLoadTaskArtifacts(props.log, props.open) ? (
-          <section aria-label={t('Preview')} className='min-w-0 space-y-1.5'>
-            <Label className='text-xs font-semibold'>{t('Preview')}</Label>
-            <TaskArtifactsPanel
-              key={props.log.task_id}
-              log={props.log}
-              enabled={props.open}
-            />
-          </section>
-        ) : null}
-        <DetailSection label={t('Basic Information')}>
-          <DetailRow label={t('Task ID')} value={props.log.task_id} mono />
-          <DetailRow label={t('Platform')} value={props.log.platform} mono />
-          <DetailRow
-            label={t('Action')}
-            value={t(taskActionMapper.getLabel(props.log.action))}
-          />
-          <DetailRow
-            label={t('Progress')}
-            value={props.log.progress || '-'}
-            mono
-          />
-          <DetailRow
-            label={t('Submit Time')}
-            value={formatTaskTimestamp(props.log.submit_time)}
-            mono
-          />
-          <DetailRow
-            label={t('Start Time')}
-            value={formatTaskTimestamp(props.log.start_time)}
-            mono
-          />
-          <DetailRow
-            label={t('Finish Time')}
-            value={formatTaskTimestamp(props.log.finish_time)}
-            mono
-          />
-          {properties?.origin_model_name ? (
+      <Tabs
+        key={`${props.log.task_id}-${props.open}-${props.initialSection}`}
+        defaultValue={props.initialSection ?? 'overview'}
+        className='min-w-0 gap-3'
+      >
+        <TabsList className='w-full' aria-label={t('Task Details')}>
+          <TabsTrigger value='overview'>{t('Overview')}</TabsTrigger>
+          <TabsTrigger value='parameters'>
+            {t('Request Parameters')}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value='parameters' className='min-w-0 space-y-3'>
+          {requestParams !== undefined ? (
+            <>
+              <div className='flex items-center justify-between gap-2'>
+                <Label className='text-xs font-semibold'>
+                  {t('Request Parameters')}
+                </Label>
+                <CopyButton
+                  value={requestParams}
+                  size='sm'
+                  variant='outline'
+                  aria-label={t('Copy request parameters')}
+                >
+                  {t('Copy')}
+                </CopyButton>
+              </div>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'Saved request snapshot. Credentials and file contents are omitted; large values may be shortened.'
+                )}
+              </p>
+              <pre className='bg-muted/30 max-h-[48dvh] min-w-0 overflow-auto rounded-md border p-3 font-mono text-xs break-all whitespace-pre-wrap'>
+                {requestParams}
+              </pre>
+            </>
+          ) : (
+            <p className='text-muted-foreground rounded-md border p-4 text-sm'>
+              {t('No saved request parameters for this task.')}
+            </p>
+          )}
+        </TabsContent>
+        <TabsContent value='overview' className='min-w-0 space-y-3'>
+          {shouldLoadTaskArtifacts(props.log, props.open) ? (
+            <section aria-label={t('Preview')} className='min-w-0 space-y-1.5'>
+              <Label className='text-xs font-semibold'>{t('Preview')}</Label>
+              <TaskArtifactsPanel
+                key={props.log.task_id}
+                log={props.log}
+                enabled={props.open}
+              />
+            </section>
+          ) : null}
+          <DetailSection label={t('Basic Information')}>
+            <DetailRow label={t('Task ID')} value={props.log.task_id} mono />
+            <DetailRow label={t('Platform')} value={props.log.platform} mono />
             <DetailRow
-              label={t('Original Model')}
-              value={properties.origin_model_name}
+              label={t('Action')}
+              value={t(taskActionMapper.getLabel(props.log.action))}
+            />
+            <DetailRow
+              label={t('Progress')}
+              value={props.log.progress || '-'}
               mono
             />
-          ) : null}
-          {properties?.upstream_model_name ? (
             <DetailRow
-              label={t('Actual Model')}
-              value={properties.upstream_model_name}
+              label={t('Submit Time')}
+              value={formatTaskTimestamp(props.log.submit_time)}
               mono
             />
-          ) : null}
-          {props.log.fail_reason ? (
-            <DetailRow label={t('Fail Reason')} value={props.log.fail_reason} />
-          ) : null}
-        </DetailSection>
-
-        {props.log.request_params ? (
-          <DetailSection label={t('Request Parameters')}>
-            <pre className='bg-background max-h-72 overflow-auto rounded border p-2 font-mono text-xs whitespace-pre-wrap'>
-              {JSON.stringify(props.log.request_params, null, 2)}
-            </pre>
+            <DetailRow
+              label={t('Start Time')}
+              value={formatTaskTimestamp(props.log.start_time)}
+              mono
+            />
+            <DetailRow
+              label={t('Finish Time')}
+              value={formatTaskTimestamp(props.log.finish_time)}
+              mono
+            />
+            {properties?.origin_model_name ? (
+              <DetailRow
+                label={t('Original Model')}
+                value={properties.origin_model_name}
+                mono
+              />
+            ) : null}
+            {properties?.upstream_model_name ? (
+              <DetailRow
+                label={t('Actual Model')}
+                value={properties.upstream_model_name}
+                mono
+              />
+            ) : null}
+            {props.log.fail_reason ? (
+              <DetailRow
+                label={t('Fail Reason')}
+                value={props.log.fail_reason}
+              />
+            ) : null}
           </DetailSection>
-        ) : null}
 
-        {props.isAdmin ? (
-          <DetailSection
-            label={t('Admin Only')}
-            icon={
-              <HugeiconsIcon
-                icon={Shield01Icon}
-                className='size-3.5 text-blue-500'
-                strokeWidth={2}
-              />
-            }
-          >
-            <DetailRow
-              label={t('User')}
-              value={props.log.username || String(props.log.user_id)}
-            />
-            <DetailRow
-              label={t('Channel')}
-              value={`#${props.log.channel_id}`}
-              mono
-            />
-            <DetailRow label={t('Group')} value={props.log.group || '-'} />
-            <DetailRow
-              label={t('Quota')}
-              value={formatLogQuota(props.log.quota)}
-              mono
-            />
-            {props.log.admin_info?.request_id ? (
-              <DetailRow
-                label={t('Request ID')}
-                value={props.log.admin_info.request_id}
-                mono
-              />
-            ) : null}
-            {props.log.admin_info?.request_path ? (
-              <DetailRow
-                label={t('Request Path')}
-                value={props.log.admin_info.request_path}
-                mono
-              />
-            ) : null}
-            {plugin ? (
-              <>
-                <DetailRow
-                  label={t('Task Plugin')}
-                  value={plugin.name || plugin.key}
+          {props.isAdmin ? (
+            <DetailSection
+              label={t('Admin Only')}
+              icon={
+                <HugeiconsIcon
+                  icon={Shield01Icon}
+                  className='size-3.5 text-blue-500'
+                  strokeWidth={2}
                 />
-                <DetailRow label={t('Plugin key')} value={plugin.key} mono />
+              }
+            >
+              <DetailRow
+                label={t('User')}
+                value={props.log.username || String(props.log.user_id)}
+              />
+              <DetailRow
+                label={t('Channel')}
+                value={`#${props.log.channel_id}`}
+                mono
+              />
+              <DetailRow label={t('Group')} value={props.log.group || '-'} />
+              <DetailRow
+                label={t('Quota')}
+                value={formatLogQuota(props.log.quota)}
+                mono
+              />
+              {props.log.admin_info?.request_id ? (
                 <DetailRow
-                  label={t('Version')}
-                  value={plugin.version || '-'}
+                  label={t('Request ID')}
+                  value={props.log.admin_info.request_id}
                   mono
                 />
-                {plugin.author ? (
+              ) : null}
+              {props.log.admin_info?.request_path ? (
+                <DetailRow
+                  label={t('Request Path')}
+                  value={props.log.admin_info.request_path}
+                  mono
+                />
+              ) : null}
+              {plugin ? (
+                <>
                   <DetailRow
-                    label={t('Plugin author')}
-                    value={<PluginAuthorLink author={plugin.author} showUrl />}
+                    label={t('Task Plugin')}
+                    value={plugin.name || plugin.key}
                   />
-                ) : null}
-              </>
-            ) : null}
-          </DetailSection>
-        ) : null}
+                  <DetailRow label={t('Plugin key')} value={plugin.key} mono />
+                  <DetailRow
+                    label={t('Version')}
+                    value={plugin.version || '-'}
+                    mono
+                  />
+                  {plugin.author ? (
+                    <DetailRow
+                      label={t('Plugin author')}
+                      value={
+                        <PluginAuthorLink author={plugin.author} showUrl />
+                      }
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </DetailSection>
+          ) : null}
 
-        {props.isRoot && props.log.root_info ? (
-          <DetailSection
-            label={t('Root Diagnostics')}
-            icon={
-              <HugeiconsIcon
-                icon={Wrench01Icon}
-                className='size-3.5 text-amber-500'
-                strokeWidth={2}
-              />
-            }
-          >
-            {runtime ? (
-              <>
+          {props.isRoot && props.log.root_info ? (
+            <DetailSection
+              label={t('Root Diagnostics')}
+              icon={
+                <HugeiconsIcon
+                  icon={Wrench01Icon}
+                  className='size-3.5 text-amber-500'
+                  strokeWidth={2}
+                />
+              }
+            >
+              {runtime ? (
+                <>
+                  <DetailRow
+                    label={t('API Version')}
+                    value={String(runtime.api_version)}
+                    mono
+                  />
+                  <DetailRow
+                    label={t('Plugin Generation')}
+                    value={String(runtime.generation)}
+                    mono
+                  />
+                </>
+              ) : null}
+              {access.upstreamTaskId ? (
                 <DetailRow
-                  label={t('API Version')}
-                  value={String(runtime.api_version)}
+                  label={t('Upstream Task ID')}
+                  value={access.upstreamTaskId}
                   mono
                 />
+              ) : null}
+              {access.nodeName ? (
                 <DetailRow
-                  label={t('Plugin Generation')}
-                  value={String(runtime.generation)}
+                  label={t('Node Name')}
+                  value={access.nodeName}
                   mono
                 />
-              </>
-            ) : null}
-            {access.upstreamTaskId ? (
-              <DetailRow
-                label={t('Upstream Task ID')}
-                value={access.upstreamTaskId}
-                mono
-              />
-            ) : null}
-            {access.nodeName ? (
-              <DetailRow label={t('Node Name')} value={access.nodeName} mono />
-            ) : null}
-          </DetailSection>
-        ) : null}
-      </div>
+              ) : null}
+            </DetailSection>
+          ) : null}
+        </TabsContent>
+      </Tabs>
     </Dialog>
   )
 }

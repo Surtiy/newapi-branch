@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Consumed quota": "Quota consommé",
+    "Refunded quota": "Quota remboursé",
+    "Refunded to subscription": "Remboursé à l’abonnement",
     "Main site": "Site principal",
     "Main site API key": "Clé API du site principal",
     "Configured; enter a new key to replace": "Configurée ; saisir une nouvelle clé pour la remplacer",

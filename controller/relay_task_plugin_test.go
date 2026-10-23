@@ -1,8 +1,11 @@
 package controller
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -225,6 +228,55 @@ func TestExecuteTaskSubmissionPersistsPinnedPluginProvenance(t *testing.T) {
 	require.NotNil(t, stored.PrivateData.Execution.TaskPlugin.Author)
 	assert.Equal(t, "Community Author", stored.PrivateData.Execution.TaskPlugin.Author.Name)
 	assert.Equal(t, "upstream-private", stored.PrivateData.UpstreamTaskID)
+}
+
+func TestExecuteTaskSubmissionCapturesOriginalRequestParams(t *testing.T) {
+	var multipartBody bytes.Buffer
+	w := multipart.NewWriter(&multipartBody)
+	require.NoError(t, w.WriteField("model", "original"))
+	require.NoError(t, w.WriteField("prompt", "@角色A #普通话"))
+	require.NoError(t, w.WriteField("max_tokens", "0"))
+	require.NoError(t, w.WriteField("api_key", "CANARY"))
+	require.NoError(t, w.Close())
+	for _, tc := range []struct{ name, body, contentType, originalType, expected string }{
+		{"json", `{"model":"original","prompt":"@角色A #普通话","max_tokens":0,"enabled":false,"api_key":"CANARY"}`, "application/json", "", `{"model":"original","prompt":"@角色A #普通话","max_tokens":0,"enabled":false}`},
+		{"multipart saved boundary", multipartBody.String(), "multipart/form-data; boundary=rewritten", w.FormDataContentType(), `{"model":"original","prompt":"@角色A #普通话","max_tokens":"0"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := make([]string, 0, 3)
+			database := setupTaskSubmissionDatabase(t, true, &events)
+			previous := common.LogConsumeEnabled
+			common.LogConsumeEnabled = false
+			t.Cleanup(func() { common.LogConsumeEnabled = previous })
+			c := taskSubmissionTestContext()
+			t.Cleanup(func() { common.CleanupBodyStorage(c) })
+			c.Request = httptest.NewRequest(http.MethodPost, "/plugin/submit", strings.NewReader(tc.body))
+			c.Request.Header.Set("Content-Type", tc.contentType)
+			if tc.originalType != "" {
+				c.Set("_original_multipart_ct", tc.originalType)
+			}
+			billing := &taskSubmissionTestBilling{events: &events}
+			outcome, taskErr := executeTaskSubmissionWith(c, taskSubmissionRelayInfo(billing), func(c *gin.Context, _ *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+				body, err := io.ReadAll(c.Request.Body)
+				require.NoError(t, err)
+				assert.Equal(t, tc.body, string(body), "snapshot capture must preserve the upstream body")
+				c.Request.Header.Set("Content-Type", "application/json")
+				rewritten, err := common.CreateBodyStorage([]byte(`{"model":"rewritten"}`))
+				require.NoError(t, err)
+				common.CleanupBodyStorage(c)
+				c.Set(common.KeyBodyStorage, rewritten)
+				return &relay.TaskSubmitResult{Platform: constant.TaskPlatform("plugin"), UpstreamTaskID: "upstream-private"}, nil
+			})
+			require.Nil(t, taskErr)
+			require.NotNil(t, outcome)
+			var stored model.Task
+			require.NoError(t, database.First(&stored, outcome.Task.ID).Error)
+			assert.JSONEq(t, tc.expected, string(stored.PrivateData.RequestParams))
+			assert.NotContains(t, string(stored.PrivateData.RequestParams), "CANARY")
+			assert.Equal(t, []string{"reserve", "insert", "settle"}, events)
+			assert.Zero(t, billing.refunds)
+		})
+	}
 }
 
 func TestExecuteTaskSubmissionRefundsCancellationBeforeDurableBarrier(t *testing.T) {

@@ -30,10 +30,12 @@ import {
 } from '@/components/ui/tooltip'
 import { formatLogQuota } from '@/lib/format'
 
+import { LOG_TYPE_ENUM } from '../constants'
 import { hasToolSurcharge } from '../lib/format'
 import type { LogOtherData } from '../types'
 
 interface LogCostDisplayProps {
+  logType: number
   quota: number
   other: LogOtherData | null
 }
@@ -92,7 +94,7 @@ function QuotaBadge(props: { quota: number }) {
   )
 }
 
-function SubscriptionBadge(props: { quota: number }) {
+function SubscriptionBadge(props: { quota: number; isRefund: boolean }) {
   const { t } = useTranslation()
 
   return (
@@ -105,12 +107,16 @@ function SubscriptionBadge(props: { quota: number }) {
             size='sm'
             copyable={false}
             className='cursor-help'
+            tabIndex={0}
           />
         }
       />
       <TooltipContent>
         <span>
-          {t('Deducted by subscription')}: {formatLogQuota(props.quota)}
+          {props.isRefund
+            ? t('Refunded to subscription')
+            : t('Deducted by subscription')}
+          : {formatLogQuota(props.quota)}
         </span>
       </TooltipContent>
     </Tooltip>
@@ -118,26 +124,35 @@ function SubscriptionBadge(props: { quota: number }) {
 }
 
 export function LogCostDisplay(props: LogCostDisplayProps) {
+  const { t } = useTranslation()
+  const isConsume = props.logType === LOG_TYPE_ENUM.CONSUME
+  const isRefund = props.logType === LOG_TYPE_ENUM.REFUND
   const isSubscription = props.other?.billing_source === 'subscription'
-  const showToolSurcharge = hasToolSurcharge(props.other)
-
-  if (!isSubscription && !showToolSurcharge) {
-    return (
-      <div className='flex flex-col gap-0.5'>
-        <QuotaBadge quota={props.quota} />
-      </div>
-    )
+  const showToolSurcharge = !isRefund && hasToolSurcharge(props.other)
+  let label = t('Cost')
+  if (isConsume) {
+    label = t('Consumed quota')
+  } else if (isRefund) {
+    label = t('Refunded quota')
   }
 
   return (
     <TooltipProvider>
-      <div className='inline-flex items-center gap-1'>
-        {isSubscription ? (
-          <SubscriptionBadge quota={props.quota} />
-        ) : (
-          <QuotaBadge quota={props.quota} />
+      <div
+        role='group'
+        aria-label={label}
+        className='flex min-w-0 flex-col gap-0.5'
+      >
+        {(isConsume || isRefund) && (
+          <span className='text-muted-foreground text-xs'>{label}</span>
         )}
-        {showToolSurcharge ? <ToolSurchargeMarker /> : null}
+        <div className='inline-flex max-w-full flex-wrap items-center gap-1'>
+          <QuotaBadge quota={props.quota} />
+          {isSubscription && (isConsume || isRefund) ? (
+            <SubscriptionBadge quota={props.quota} isRefund={isRefund} />
+          ) : null}
+          {showToolSurcharge ? <ToolSurchargeMarker /> : null}
+        </div>
       </div>
     </TooltipProvider>
   )

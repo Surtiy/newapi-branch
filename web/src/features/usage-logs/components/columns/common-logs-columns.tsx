@@ -747,7 +747,7 @@ export function useCommonLogsColumns(
 
         const quota = row.getValue('quota') as number
         const other = parseLogOther(log.other)
-        return <LogCostDisplay quota={quota} other={other} />
+        return <LogCostDisplay logType={log.type} quota={quota} other={other} />
       },
     },
 

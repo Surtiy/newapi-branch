@@ -614,6 +614,22 @@ func executeTaskSubmissionWith(
 		diagnostics.cancelled("before_attempt", 0)
 		return nil, service.TaskErrorWrapperLocal(requestErr, "request_cancelled", http.StatusRequestTimeout)
 	}
+	// Capture once before adaptors can rewrite Content-Type or request parameters.
+	// Use an independent bounded reader: disk-backed uploads must not be loaded
+	// wholesale into memory or disturb the relay's body cursor.
+	var requestParams []byte
+	if storage, bodyErr := common.GetBodyStorage(c); bodyErr == nil {
+		if reader, readErr := storage.NewReader(); readErr == nil {
+			contentType := c.Request.Header.Get("Content-Type")
+			if original, ok := c.Get("_original_multipart_ct"); ok {
+				if originalType, ok := original.(string); ok {
+					contentType = originalType
+				}
+			}
+			requestParams = model.BuildTaskRequestParamsFromReader(reader, contentType)
+			_ = reader.Close()
+		}
+	}
 
 	retryParam := &service.RetryParam{
 		Ctx:         c,
@@ -748,11 +764,7 @@ func executeTaskSubmissionWith(
 		TieredSnapshot:  relayInfo.TieredBillingSnapshot,
 	}
 	task.Quota = result.Quota
-	if storage, bodyErr := common.GetBodyStorage(c); bodyErr == nil {
-		if body, readErr := storage.Bytes(); readErr == nil {
-			task.PrivateData.RequestParams = model.BuildTaskRequestParams(body, c.Request.Header.Get("Content-Type"))
-		}
-	}
+	task.PrivateData.RequestParams = requestParams
 	task.Data = result.TaskData
 	if len(result.PluginState) > 0 {
 		task.PrivateData.PluginState = result.PluginState

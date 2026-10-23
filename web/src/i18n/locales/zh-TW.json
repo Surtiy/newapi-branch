@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Consumed quota": "消費額度",
+    "Refunded quota": "退款額度",
+    "Refunded to subscription": "退還至訂閱",
     "Main site": "主站",
     "Main site API key": "主站 API Key",
     "Configured; enter a new key to replace": "已設定，輸入新金鑰可替換",

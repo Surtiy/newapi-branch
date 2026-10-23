@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Consumed quota": "消費クォータ",
+    "Refunded quota": "返金クォータ",
+    "Refunded to subscription": "サブスクリプションに返還",
     "Main site": "メインサイト",
     "Main site API key": "メインサイトの API キー",
     "Configured; enter a new key to replace": "設定済み。変更するには新しいキーを入力",

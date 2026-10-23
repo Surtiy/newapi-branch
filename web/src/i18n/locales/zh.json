@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Consumed quota": "消费额度",
+    "Refunded quota": "退款额度",
+    "Refunded to subscription": "退还至订阅",
     "Review candidate directory groups": "请核对模型的候选分组",
     "The main site catalog does not identify actual token bindings. Check these candidate groups against your token settings before syncing prices.": "主站模型目录未提供令牌的真实绑定分组。以下为候选分组，同步价格前请与主站令牌设置核对。",
     "{{model}} · {{key}}: {{groups}}": "{{model}} · {{key}}：{{groups}}",
@@ -6245,6 +6248,9 @@
     "Model pricing changed. Fetch it again before syncing.": "模型价格已变化，请重新拉取后再同步。",
     "Duplicate model names": "模型重名提示",
     "Update multiplier for {{group}}": "同步 {{group}} 的倍率",
-    "Main site catalog changed. Fetch it again before syncing.": "主站模型目录已变化，请重新拉取后同步。"
+    "Main site catalog changed. Fetch it again before syncing.": "主站模型目录已变化，请重新拉取后同步。",
+    "Copy request parameters": "复制请求参数",
+    "No saved request parameters for this task.": "此任务未保存请求参数，历史记录不补造传参。",
+    "Saved request snapshot. Credentials and file contents are omitted; large values may be shortened.": "显示已保存的请求快照：凭据与文件内容已省略，超长字段可能已截断。"
   }
 }
