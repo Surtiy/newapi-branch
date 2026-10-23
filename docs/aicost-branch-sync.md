@@ -74,15 +74,19 @@ For a public installation:
 
 - Build this repository's source using its Dockerfile, for example
   `docker build -t new-api-branch:local .`, and use that image in your deployment.
-  The inherited Compose examples reference the upstream `calciumion/new-api`
-  image; pulling that image alone does not include this branch's changes.
+  The repository's Compose configuration builds context `.` with image
+  `new-api-branch:local`; use `docker compose up -d --build` from the repository
+  root. Pulling the upstream `calciumion/new-api` image alone does not include
+  this branch's changes. The Docker build lints the embedded branch plugin.
 - Set **Server Address** (`ServerAddress`) to your own public HTTPS URL in
   system settings. Set **Task Public Address** (`TaskPublicAddress`) when media
   uses a different public origin; otherwise artifact URLs use Server Address.
   The development default `http://localhost:3000` is not your public address.
   URL generation deliberately does not trust arbitrary request Host headers.
-- Import and enable the video plugin as described below. Its database entry is
-  separate from the application source and image.
+- The video plugin is embedded in the application binary and registered at
+  startup. Fresh Docker installations need no manual plugin import or database
+  plugin row. Existing administrator overrides and disabled settings are honored
+  as described below.
 - Supply your own database/cache credentials, persistent data volumes and
   session secrets. For HTTPS, configure secure cookies and exact trusted
   origins using the documented session settings. No credentials from another
@@ -95,18 +99,37 @@ redirect rejection and SSRF protections are retained.
 
 ## Video Plugin
 
-`branch-plugin.js` is the `aicost-branch` task-plugin source. Updating the Go
-application alone does not update a previously imported plugin in the database.
-Import/update and enable this plugin through the existing task-plugin management
-workflow as part of deployment. Keep the plugin key unchanged so existing
-channel configuration continues to resolve it.
+`plugins/tasks/aicost-branch/plugin.js` is the single source of the
+`aicost-branch` task plugin. The existing `go:embed tasks` and `RegisterFactory`
+startup path include it in the Go binary and Docker image automatically. There
+is no separate root JavaScript copy, plugin download, manual import, database
+seeding, or automatic database update required for a fresh installation.
+
+The factory implements `openai_video`, declares `seconds` usage, and supports
+both per-request and per-second billing expressions. Branch catalog imports
+map public video model names to its `aicost-branch-video` routing alias; the
+upstream still receives the public model requested by the client.
+
+An active, enabled database override with key `aicost-branch` continues to take
+precedence. Updating the image does not overwrite that source or its settings.
+Removing the override through the existing management workflow restores the
+bundled factory, unless it is disabled. Keep the plugin key unchanged for
+existing channels and tasks. Older imported versions remain administrator-owned;
+remove an override only when intentionally returning to the bundled version.
+
+The global `TaskPluginEnabled` option / `TASK_PLUGIN_ENABLED` environment setting
+and the `TaskPluginDisabledFactoryKeys` option remain effective. Disabling the
+factory key hides the bundled plugin, not an independently enabled override;
+turning off the global switch hides both. The application does not re-enable
+an explicitly disabled plugin during startup or synchronization.
 
 ## Focused Regression Tests
 
 Backend tests can be run from the repository root with:
 
 ```sh
-go test ./controller ./model -run 'Test(Branch|RequestBranchCatalog|ScopeBranchCatalog|VideoBillingExpression)' -count=1
+go test -p 1 ./plugins -run '^TestBuiltIn' -count=1
+go test -p 1 ./controller ./model -run 'Test(Branch|RequestBranchCatalog|ScopeBranchCatalog|VideoBillingExpression)' -count=1
 node --test branch-plugin.test.mjs
 ```
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildContentRequest, extractUsageOnComplete, parseTaskResult } from './branch-plugin.js';
+import { buildContentRequest, extractUsageOnComplete, parseTaskResult } from './plugins/tasks/aicost-branch/plugin.js';
 
 for (const status of ['failed', 'failure', 'cancelled', 'canceled', 'expired']) {
   test(`outer ${status} overrides request metadata and stale nested status`, () => {

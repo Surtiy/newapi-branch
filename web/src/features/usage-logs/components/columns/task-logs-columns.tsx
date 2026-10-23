@@ -29,7 +29,6 @@ import { cn } from '@/lib/utils'
 import { taskActionMapper, taskStatusMapper } from '../../lib/mappers'
 import type { TaskLog } from '../../types'
 import { PluginAuthorLink } from '../plugin-author-link'
-import { TaskArtifactsCell } from '../task-artifacts'
 import { TaskDetailsCell } from '../task-details-cell'
 import { useUsageLogsContext } from '../usage-logs-provider'
 import {
@@ -198,15 +197,6 @@ export function useTaskLogsColumns(
       },
     },
     createProgressColumn<TaskLog>({ headerLabel: t('Progress') }),
-    {
-      id: 'artifacts',
-      header: t('Artifacts'),
-      cell: ({ row }) => (
-        <TaskArtifactsCell key={row.original.task_id} log={row.original} />
-      ),
-      size: 120,
-      maxSize: 140,
-    },
     {
       accessorKey: 'fail_reason',
       header: t('Details'),

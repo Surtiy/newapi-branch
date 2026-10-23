@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	_ "github.com/QuantumNous/new-api/plugins"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -153,11 +154,8 @@ func TestBranchCatalogImportLifecycle(t *testing.T) {
 func TestBranchVideoBillingAndRouting(t *testing.T) {
 	require.NoError(t, DB.AutoMigrate(&Option{}, &Channel{}, &Ability{}, &Model{}, &Vendor{}))
 	InitOptionMap()
-	source, err := os.ReadFile("../branch-plugin.js")
-	require.NoError(t, err)
-	_, err = jsplugin.DefaultRegistry.Register(string(source), jsplugin.Options{})
-	require.NoError(t, err)
-	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister("aicost-branch") })
+	_, available := jsplugin.DefaultRegistry.Generation().Get("aicost-branch")
+	require.True(t, available, "video pricing must work using the factory without a database plugin import")
 	for _, test := range []struct {
 		expr string
 		want float64
@@ -181,5 +179,9 @@ func TestBranchVideoBillingAndRouting(t *testing.T) {
 	target, ok := ResolveTaskModelAlias(jsplugin.DefaultRegistry.Generation(), name)
 	require.True(t, ok, "future model names must resolve without rebuilding the plugin")
 	require.Equal(t, "aicost-branch", target.PluginKey)
+	require.Equal(t, "aicost-branch-video", target.Declared)
+	binding, found := jsplugin.DefaultRegistry.Generation().LookupEndpoint("POST", "/v1/videos", target.Declared)
+	require.True(t, found, "channel-mapped future model must resolve the built-in video endpoint")
+	require.Equal(t, "aicost-branch", binding.Plugin.Meta.Key)
 	require.NoError(t, ValidateModelPricing(name, values), "ordinary local price editing must recognize the imported video")
 }

@@ -1,5 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createInstance } from 'i18next'
 import { I18nextProvider } from 'react-i18next'
@@ -8,6 +14,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import en from '@/i18n/locales/en.json'
 
 import type { TaskArtifactProjection, TaskLog } from '../../types'
+import { useTaskLogsColumns } from '../columns/task-logs-columns'
 import { TaskDetailsDialog } from '../dialogs/task-details-dialog'
 import { TaskArtifactsCell } from '../task-artifacts'
 import { TaskDetailsCell } from '../task-details-cell'
@@ -67,6 +74,29 @@ function renderDetails(log = task, projection = video, isAdmin = false) {
     </I18nextProvider>
   )
 }
+
+test.each([false, true])(
+  'task columns keep details without a duplicate artifacts column for admin=%s',
+  (isAdmin) => {
+    const { result } = renderHook(() => useTaskLogsColumns(isAdmin, false), {
+      wrapper: ({ children }) => (
+        <I18nextProvider i18n={i18n}>{children}</I18nextProvider>
+      ),
+    })
+    expect(result.current.some((column) => column.id === 'artifacts')).toBe(
+      false
+    )
+    expect(result.current.some((column) => column.header === 'Artifacts')).toBe(
+      false
+    )
+    expect(
+      result.current.find((column) => column.header === 'Details')
+    ).toMatchObject({
+      accessorKey: 'fail_reason',
+      cell: expect.any(Function),
+    })
+  }
+)
 
 test.each([false, true])(
   'task details play projected video for admin=%s',

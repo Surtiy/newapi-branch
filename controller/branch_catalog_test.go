@@ -14,7 +14,6 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 )
@@ -683,11 +682,8 @@ func TestScopeBranchCatalogRejectsInconsistentAPIKeyGroups(t *testing.T) {
 }
 
 func TestBranchPricingAppliesUniformPriceMultiplier(t *testing.T) {
-	source, err := os.ReadFile("../branch-plugin.js")
-	require.NoError(t, err)
-	_, err = jsplugin.DefaultRegistry.Register(string(source), jsplugin.Options{})
-	require.NoError(t, err)
-	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister("aicost-branch") })
+	_, available := jsplugin.DefaultRegistry.Generation().Get("aicost-branch")
+	require.True(t, available, "branch pricing must use the built-in factory")
 	language, err := branchPricing(branchCatalogItem{Pricing: model.Pricing{ModelName: "language", QuotaType: 0, ModelRatio: 2, CompletionRatio: 4}, ModelType: "language"}, 1.5)
 	require.NoError(t, err)
 	require.Equal(t, 3.0, language["ModelRatio"])

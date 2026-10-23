@@ -2,15 +2,136 @@ package plugins
 
 import (
 	"io/fs"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 var expectedKeys = []string{"alibaba", "doubao", "google", "hailuo", "jimeng", "kling", "sora", "sunoapi", "vertex-ai", "vidu"}
+
+func TestBuiltInAICostBranchFactoryWithoutDatabase(t *testing.T) {
+	plugin, found := jsplugin.DefaultRegistry.Generation().Get("aicost-branch")
+	require.True(t, found, "embedded factory must be available before any database import")
+	assert.NotContains(t, jsplugin.DefaultRegistry.OverridePlugins(), "aicost-branch")
+	source, err := Source("aicost-branch")
+	require.NoError(t, err)
+	registry := jsplugin.NewRegistry()
+	plugin, err = registry.RegisterFactory(source, jsplugin.Options{Key: "aicost-branch"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"aicost-branch-video"}, plugin.Meta.Models)
+	assert.Equal(t, []jsplugin.ProtocolClaim{{Name: "openai_video"}}, plugin.Meta.Protocols)
+	// Only model-bearing create operations are indexed; queries resolve by task.
+	binding, found := registry.Generation().LookupEndpoint("POST", "/v1/videos", "aicost-branch-video")
+	require.True(t, found)
+	assert.Same(t, plugin, binding.Plugin)
+	schema, ok := plugin.Meta.UsageSchema["seconds"]
+	require.True(t, ok)
+	assert.Equal(t, "number", schema.Type)
+	assert.Equal(t, "second", schema.Unit)
+	decoded, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
+		"model": "seedance2.0-720p", "upstreamModel": "aicost-branch-video",
+		"body": map[string]any{"kind": "json", "value": map[string]any{"prompt": "@角色A/#普通话", "seconds": 30}},
+	})
+	require.NoError(t, err)
+	encoded, err := common.Marshal(decoded)
+	require.NoError(t, err)
+	var request map[string]any
+	require.NoError(t, common.Unmarshal(encoded, &request))
+	assert.Equal(t, "seedance2.0-720p", request["model"])
+	submit, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", map[string]any{
+		"model": request["model"], "requestBody": request["requestBody"],
+		"baseUrl": "https://upstream.example", "apiKey": "test-key",
+	})
+	require.NoError(t, err)
+	encoded, err = common.Marshal(submit)
+	require.NoError(t, err)
+	var upstream map[string]any
+	require.NoError(t, common.Unmarshal(encoded, &upstream))
+	assert.Equal(t, "https://upstream.example/v1/videos", upstream["url"])
+	assert.Equal(t, map[string]any{"model": "seedance2.0-720p", "prompt": "@角色A/#普通话", "seconds": float64(30)}, upstream["body"])
+
+	value, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{"requestBody": map[string]any{"seconds": "30"}})
+	require.NoError(t, err)
+	encoded, err = common.Marshal(value)
+	require.NoError(t, err)
+	var usage map[string]any
+	require.NoError(t, common.Unmarshal(encoded, &usage))
+	assert.Equal(t, map[string]any{"seconds": float64(30)}, usage)
+	for _, test := range []struct {
+		expr string
+		want float64
+	}{{`tier("request", 3.3)`, 3.3}, {`tier("second", u("seconds") * 0.4)`, 12}} {
+		require.NoError(t, billing_setting.SmokeTestTaskExpr(test.expr, plugin.Meta.UsageSchema))
+		cost, _, err := billingexpr.RunExprWithRequest(test.expr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: usage})
+		require.NoError(t, err)
+		assert.Equal(t, test.want, cost)
+	}
+	assert.Error(t, billing_setting.SmokeTestTaskExpr(`u("undeclared_usage")`, plugin.Meta.UsageSchema))
+}
+
+func TestBuiltInAICostBranchOverrideFallbackAndSwitches(t *testing.T) {
+	source, err := Source("aicost-branch")
+	require.NoError(t, err)
+	registry := jsplugin.NewRegistry()
+	factory, err := registry.RegisterFactory(source, jsplugin.Options{})
+	require.NoError(t, err)
+	overrideSource := strings.Replace(source, "version: '"+factory.Meta.Version+"'", "version: '"+factory.Meta.Version+"-custom'", 1)
+	override, err := jsplugin.CompilePlugin(overrideSource, jsplugin.Options{})
+	require.NoError(t, err)
+	require.NoError(t, registry.ReplaceOverrides([]*jsplugin.LoadedPlugin{override}))
+	active, found := registry.Get("aicost-branch")
+	require.True(t, found)
+	assert.Same(t, override, active)
+	assert.NotEqual(t, factory.Meta.Version, active.Meta.Version)
+
+	// Refreshing the bundled factory leaves the administrator's override intact.
+	factory, err = registry.RegisterFactory(source, jsplugin.Options{})
+	require.NoError(t, err)
+	active, found = registry.Get("aicost-branch")
+	require.True(t, found)
+	assert.Same(t, override, active)
+	registry.SetEnabled(false)
+	_, found = registry.Get("aicost-branch")
+	assert.False(t, found)
+	_, found = registry.Generation().LookupEndpoint("POST", "/v1/videos", "aicost-branch-video")
+	assert.False(t, found)
+	registry.SetEnabled(true)
+	active, found = registry.Get("aicost-branch")
+	require.True(t, found)
+	assert.Same(t, override, active)
+
+	// A database sync removing an override restores the bundled implementation.
+	require.NoError(t, registry.ReplaceOverrides(nil))
+	active, found = registry.Get("aicost-branch")
+	require.True(t, found)
+	assert.Same(t, factory, active)
+	binding, found := registry.Generation().LookupEndpoint("POST", "/v1/videos", "aicost-branch-video")
+	require.True(t, found)
+	assert.Same(t, factory, binding.Plugin)
+
+	registry.SetDisabledFactoryKeys([]string{"aicost-branch"})
+	_, found = registry.Get("aicost-branch")
+	assert.False(t, found)
+	_, found = registry.Generation().LookupEndpoint("POST", "/v1/videos", "aicost-branch-video")
+	assert.False(t, found)
+	require.NoError(t, registry.ReplaceOverrides([]*jsplugin.LoadedPlugin{override}))
+	active, found = registry.Get("aicost-branch")
+	require.True(t, found)
+	assert.Same(t, override, active, "disabling the factory must not remove an enabled override")
+	require.NoError(t, registry.Unregister("aicost-branch"))
+	_, found = registry.Get("aicost-branch")
+	assert.False(t, found, "removing an override must respect the disabled factory")
+	registry.SetDisabledFactoryKeys(nil)
+	active, found = registry.Get("aicost-branch")
+	require.True(t, found)
+	assert.Same(t, factory, active)
+}
 
 func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing.T) {
 	generation := jsplugin.DefaultRegistry.Generation()
@@ -77,7 +198,9 @@ func TestBuiltInTaskPluginResponsesAndUsageContracts(t *testing.T) {
 			actualKeys = append(actualKeys, entry.Name())
 		}
 	}
-	assert.Equal(t, expectedKeys, actualKeys)
+	// The branch adapter is video-only; vendor Responses contracts below remain unchanged.
+	allKeys := append([]string{"aicost-branch"}, expectedKeys...)
+	assert.Equal(t, allKeys, actualKeys)
 
 	for _, key := range expectedKeys {
 		t.Run(key, func(t *testing.T) {

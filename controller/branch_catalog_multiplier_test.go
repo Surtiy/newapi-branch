@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 
@@ -21,11 +20,8 @@ func TestBranchCatalogRepeatedMultipliersUseMainPrices(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Log{}, &model.AuditLog{}))
 	model.InitOptionMap()
-	plugin, err := os.ReadFile("../branch-plugin.js")
-	require.NoError(t, err)
-	_, err = jsplugin.DefaultRegistry.Register(string(plugin), jsplugin.Options{})
-	require.NoError(t, err)
-	t.Cleanup(func() { jsplugin.DefaultRegistry.Unregister("aicost-branch") })
+	_, available := jsplugin.DefaultRegistry.Generation().Get("aicost-branch")
+	require.True(t, available, "branch pricing must use the built-in factory")
 
 	cache := 0.1
 	items := []branchCatalogItem{
