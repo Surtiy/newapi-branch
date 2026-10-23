@@ -54,6 +54,25 @@ const baseApiKey: ApiKey = {
 }
 
 describe('API key Auto group form mapping', () => {
+  test('retains all explicit groups through response parsing, editing and saving', () => {
+    const apiKey = apiKeySchema.parse({
+      ...baseApiKey,
+      group: 'primary',
+      groups: ['primary', 'secondary'],
+    })
+    const defaults = transformApiKeyToFormDefaults(
+      apiKey,
+      ['primary', 'secondary'],
+      2
+    )
+    const payload = transformFormDataToPayload(defaults)
+
+    expect(apiKey.groups).toEqual(['primary', 'secondary'])
+    expect(payload.group).toBe('primary')
+    expect(payload.groups).toEqual(['primary', 'secondary'])
+    expect(apiKeySchema.parse(baseApiKey).groups).toBeUndefined()
+  })
+
   test('treats legacy token responses without auto_groups as inheritance', () => {
     const legacyApiKey: Record<string, unknown> = { ...baseApiKey }
     delete legacyApiKey.auto_groups
@@ -144,6 +163,7 @@ describe('API key Auto group form mapping', () => {
     const nonAuto = {
       ...inherited,
       group: 'default',
+      groups: ['default'],
       auto_groups_mode: 'custom' as const,
       auto_groups: ['vip'],
     }

@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Review candidate directory groups": "Review candidate directory groups",
+    "The main site catalog does not identify actual token bindings. Check these candidate groups against your token settings before syncing prices.": "The main site catalog does not identify actual token bindings. Check these candidate groups against your token settings before syncing prices.",
+    "{{model}} · {{key}}: {{groups}}": "{{model}} · {{key}}: {{groups}}",
     "Delete API key": "Delete API key",
     "Delete API key {{index}}": "Delete API key {{index}}",
     "API key binding deleted": "API key binding deleted",

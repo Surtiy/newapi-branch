@@ -127,14 +127,14 @@ it('shows the server-masked credential in the sidebar without exposing a full ke
   client.clear()
 })
 
-it('lists verified bindings including empty groups without inferring extra directory groups', async () => {
+it('lists server-provided source groups without inferring extra groups in the UI', async () => {
   const { client, post } = renderSync()
   post.mockResolvedValue({
     data: {
       success: true,
       data: {
-        catalog_version: 'verified',
-        channel_version: 'verified',
+        catalog_version: 'directory',
+        channel_version: 'directory',
         bound_groups: ['kiro', 'empty-bound-group'],
         group_ratio: { kiro: 0.11 },
         models: [model('kiro-model', ['kiro'])],
@@ -146,6 +146,26 @@ it('lists verified bindings including empty groups without inferring extra direc
   expect(sidebar.getByText('kiro')).toBeVisible()
   expect(sidebar.getByText('empty-bound-group')).toBeVisible()
   expect(sidebar.queryByText('video')).not.toBeInTheDocument()
+  client.clear()
+})
+
+it('warns about candidate groups without blocking a valid newly added source', async () => {
+  const { client } = renderSync()
+  expect(
+    await screen.findByText('Review candidate directory groups')
+  ).toBeVisible()
+  const notice = screen
+    .getByText('Review candidate directory groups')
+    .closest('[role="note"]')
+  expect(notice).not.toBeNull()
+  expect(notice).toHaveTextContent('shared-model')
+  expect(notice).toHaveTextContent('sk-Abcd**********Wxyz')
+  expect(notice).toHaveTextContent('image / video')
+  expect(notice).toHaveTextContent('does not identify actual token bindings')
+  expect(await screen.findByText('image-model')).toBeVisible()
+  expect(
+    screen.getByRole('button', { name: 'Fetch main site models' })
+  ).toBeEnabled()
   client.clear()
 })
 

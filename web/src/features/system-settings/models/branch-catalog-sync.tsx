@@ -17,6 +17,7 @@ import { ConfirmDialog } from '@/components/confirm-dialog'
 import { StaticDataTable } from '@/components/data-table'
 import { EmptyState } from '@/components/empty-state'
 import { LoadingState } from '@/components/loading-state'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldLabel } from '@/components/ui/field'
@@ -248,6 +249,9 @@ export function BranchCatalogSync() {
     refetchOnWindowFocus: false,
   })
   const preview = configured && !catalog.isError ? catalog.data || null : null
+  const directoryCandidates = (preview?.models || []).filter(
+    (row) => row.groups.length > 1
+  )
   const conflicts = useMemo(() => {
     const names = new Map<
       string,
@@ -735,6 +739,35 @@ export function BranchCatalogSync() {
           )}
           {!configured && !config.isPending && (
             <EmptyState icon={KeyRound} title={t('No main site models')} />
+          )}
+          {directoryCandidates.length > 0 && (
+            <Alert
+              role='note'
+              aria-label={t('Review candidate directory groups')}
+            >
+              <AlertTitle>{t('Review candidate directory groups')}</AlertTitle>
+              <AlertDescription>
+                <p>
+                  {t(
+                    'The main site catalog does not identify actual token bindings. Check these candidate groups against your token settings before syncing prices.'
+                  )}
+                </p>
+                <ul className='mt-2 space-y-1'>
+                  {directoryCandidates.map((row) => (
+                    <li key={rowKey(row)} className='break-words'>
+                      {t('{{model}} · {{key}}: {{groups}}', {
+                        model: row.model_name,
+                        key: row.key_preview,
+                        groups: row.groups
+                          .map((group) => group.name)
+                          .join(' / '),
+                        interpolation: { escapeValue: false },
+                      })}
+                    </li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
           )}
           {conflicts.length > 0 && (
             <div

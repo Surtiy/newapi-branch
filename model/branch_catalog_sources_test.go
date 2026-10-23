@@ -13,17 +13,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestBranchReconcileVerifiedGroupsAreNotInferredFromModels(t *testing.T) {
+func TestBranchReconcileExplicitSourceScopeIsPreserved(t *testing.T) {
 	setupBranchTestDB(t)
-	id, err := SaveBranchCatalogGroupsKey(0, []string{"verified-a", "verified-b"}, "verified-test-key")
+	id, err := SaveBranchCatalogGroupsKey(0, []string{"source-a", "source-b"}, "source-test-key")
 	require.NoError(t, err)
 	t.Cleanup(func() { DB.Where("id = ?", id).Delete(&Channel{}) })
 	var source Channel
 	require.NoError(t, DB.First(&source, id).Error)
-	bound := []string{"verified-a", "verified-b"}
-	_, err = ReconcileBranchCatalogSource(&source, []BranchCatalogModelScope{{ModelName: "a-only", Groups: []string{"verified-a"}}}, bound)
+	bound := []string{"source-a", "source-b"}
+	_, err = ReconcileBranchCatalogSource(&source, []BranchCatalogModelScope{{ModelName: "a-only", Groups: []string{"source-a"}}}, bound)
 	require.NoError(t, err)
-	require.Equal(t, bound, BranchCatalogBoundGroups(&source), "a bound group without published models still belongs to the token")
+	require.Equal(t, bound, BranchCatalogBoundGroups(&source), "an explicitly supplied source scope can include groups without published models")
 	version := BranchCatalogSourceVersion(&source)
 	_, err = ReconcileBranchCatalogSource(&source, []BranchCatalogModelScope{{ModelName: "outside", Groups: []string{"outside"}}}, bound)
 	require.Error(t, err)

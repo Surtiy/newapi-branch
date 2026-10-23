@@ -184,7 +184,9 @@ it.each([
   'renders the %s progress without invalid values or hiding negative balances',
   (_label, remaining, used, percentage, color) => {
     renderQuota({ ...key, remain_quota: remaining, used_quota: used })
-    const button = screen.getByRole('button')
+    const button = screen.getByRole('button', {
+      name: /Remaining.*Used amount/,
+    })
     const progress = screen.getByRole('progressbar')
     expect(progress).toHaveAttribute('aria-valuenow', String(percentage))
     if (color) expect(progress).toHaveClass(color)
@@ -224,7 +226,7 @@ it('keeps small custom-currency amounts exact and shows full values in the detai
   expect(
     screen.getByRole('columnheader', { name: 'Quota (🐱)' })
   ).toBeInTheDocument()
-  const button = screen.getByRole('button')
+  const button = screen.getByRole('button', { name: /Remaining.*Used amount/ })
   expect(button).toHaveTextContent('0.0038')
   expect(button).not.toHaveTextContent('🐱')
   await userEvent.click(button)
@@ -267,7 +269,7 @@ it('recalculates the progress when remaining quota is edited', () => {
 it('opens details with the keyboard and restores focus when Escape closes them', async () => {
   renderQuota()
   const user = userEvent.setup()
-  const button = screen.getByRole('button')
+  const button = screen.getByRole('button', { name: /Remaining.*Used amount/ })
   act(() => button.focus())
   await user.keyboard('{Enter}')
   const detail = await screen.findByRole('dialog')
@@ -285,7 +287,7 @@ it('opens details with the keyboard and restores focus when Escape closes them',
 
 it('keeps a long amount within its column while showing the full amount in details', async () => {
   renderQuota({ ...key, remain_quota: 123456789000000, used_quota: 0 })
-  const button = screen.getByRole('button')
+  const button = screen.getByRole('button', { name: /Remaining.*Used amount/ })
   expect(button).toHaveClass('w-full', 'min-w-0')
   expect(within(button).getByText('246,913,578')).toHaveClass('truncate')
   await userEvent.click(button)

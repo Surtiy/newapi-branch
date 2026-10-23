@@ -201,13 +201,15 @@ func ConfigureBranchCatalog(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	groups, err := verifiedBranchTokenGroups(key)
+	// The upstream APIs validate the key; a machine-local allowlist must not
+	// decide which upstream users can configure a public branch installation.
+	groups, err := branchCatalogGroups(catalog)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	if len(groups) == 0 {
-		common.ApiErrorMsg(c, "此主站令牌没有已核验的绑定分组，不能新增同步来源")
+		common.ApiErrorMsg(c, "此主站令牌暂无可同步的模型分组")
 		return
 	}
 	if request.Groups != nil || request.Group != "" {
@@ -217,7 +219,7 @@ func ConfigureBranchCatalog(c *gin.Context) {
 		}
 		selected, selectionErr := model.NormalizeBranchCatalogGroups(selected)
 		if selectionErr != nil || request.Groups != nil && request.Group != "" || !slices.Equal(selected, groups) {
-			common.ApiErrorMsg(c, "提交的分组与主站已核验绑定不一致，未保存")
+			common.ApiErrorMsg(c, "提交的分组与当前主站模型目录不一致，请重新拉取")
 			return
 		}
 	}
@@ -272,10 +274,7 @@ func fetchBranchCatalog(c *gin.Context, channelID int) (*model.Channel, *branchC
 	catalog, err := requestBranchCatalog(c.Request.Context(), channel.Key)
 	var groups []string
 	if err == nil {
-		groups, err = verifiedBranchTokenGroups(channel.Key)
-		if err == nil {
-			filterBranchCatalogGroups(catalog, groups)
-		}
+		groups, err = branchCatalogGroups(catalog)
 	}
 	if err == nil && model.IsBranchCatalogSource(channel) {
 		_, err = model.ReconcileBranchCatalogSource(channel, branchCatalogScopes(catalog), groups)

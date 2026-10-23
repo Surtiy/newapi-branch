@@ -18,7 +18,6 @@ import (
 )
 
 func TestBranchCatalogRepeatedMultipliersUseMainPrices(t *testing.T) {
-	setupBranchTokenBindings(t)
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Log{}, &model.AuditLog{}))
 	model.InitOptionMap()
@@ -55,7 +54,10 @@ func TestBranchCatalogRepeatedMultipliersUseMainPrices(t *testing.T) {
 		if r.URL.Path == "/v1/models" {
 			return branchCatalogModelsResponse(t, r, names...), nil
 		}
-		body, err := common.Marshal(map[string]any{"success": true, "data": catalog})
+		scoped := catalog
+		group := strings.TrimSuffix(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), "-key")
+		filterBranchCatalogGroups(&scoped, []string{group})
+		body, err := common.Marshal(map[string]any{"success": true, "data": scoped})
 		require.NoError(t, err)
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(body))), Request: r}, nil
 	})

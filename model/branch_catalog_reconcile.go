@@ -41,7 +41,7 @@ func BranchCatalogSavedModels(channel *Channel) []BranchCatalogModelScope {
 
 // A successful, complete upstream snapshot is the only input allowed to prune
 // routing. Retired channels keep their IDs and credentials for existing tasks.
-func ReconcileBranchCatalogSource(expected *Channel, scopes []BranchCatalogModelScope, verifiedGroups ...[]string) (BranchCatalogReconcileResult, error) {
+func ReconcileBranchCatalogSource(expected *Channel, scopes []BranchCatalogModelScope, sourceGroups ...[]string) (BranchCatalogReconcileResult, error) {
 	var result BranchCatalogReconcileResult
 	groups := make([]string, 0)
 	seen := map[string]bool{}
@@ -58,8 +58,8 @@ func ReconcileBranchCatalogSource(expected *Channel, scopes []BranchCatalogModel
 	}
 	slices.Sort(groups)
 	groups = slices.Compact(groups)
-	if len(verifiedGroups) > 0 {
-		bound := verifiedGroups[0]
+	if len(sourceGroups) > 0 {
+		bound := sourceGroups[0]
 		if len(bound) > 0 {
 			var err error
 			bound, err = NormalizeBranchCatalogGroups(bound)
@@ -68,7 +68,7 @@ func ReconcileBranchCatalogSource(expected *Channel, scopes []BranchCatalogModel
 			}
 		}
 		if slices.ContainsFunc(groups, func(group string) bool { return !slices.Contains(bound, group) }) {
-			return result, errors.New("模型快照超出已核验令牌分组，未清理本地路由")
+			return result, errors.New("模型快照超出本次同步的分组范围，未清理本地路由")
 		}
 		groups = slices.Clone(bound)
 	}

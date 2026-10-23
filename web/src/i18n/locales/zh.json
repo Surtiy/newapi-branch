@@ -1,5 +1,8 @@
 {
   "translation": {
+    "Review candidate directory groups": "请核对模型的候选分组",
+    "The main site catalog does not identify actual token bindings. Check these candidate groups against your token settings before syncing prices.": "主站模型目录未提供令牌的真实绑定分组。以下为候选分组，同步价格前请与主站令牌设置核对。",
+    "{{model}} · {{key}}: {{groups}}": "{{model}} · {{key}}：{{groups}}",
     "Delete API key": "删除令牌",
     "Delete API key {{index}}": "删除令牌 {{index}}",
     "API key binding deleted": "令牌绑定已删除",

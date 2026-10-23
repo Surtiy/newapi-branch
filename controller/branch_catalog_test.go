@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"github.com/QuantumNous/new-api/common"
@@ -16,36 +15,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
 type branchCatalogTransport func(*http.Request) (*http.Response, error)
-
-func setupBranchTokenBindings(t *testing.T) {
-	t.Helper()
-	tokens := map[string]any{}
-	for key, groups := range map[string][]string{
-		"sk-cccc-private-incoming-3333": {"a", "b", "c"},
-		"test-valid-key":                {"image-group"},
-		"directory-key":                 {"images", "videos"},
-		"replacement":                   {"single"},
-		"test-multi-key":                {"a", "b"},
-		"sk-new-private-2222":           {"video-group"},
-		"test-refresh-key":              {"refresh"},
-		"test-key":                      {"image-group"},
-		"group-a-key":                   {"group-a"},
-		"group-b-key":                   {"group-b"},
-	} {
-		tokens[fmt.Sprintf("%x", sha256.Sum256([]byte(key)))] = map[string]any{"groups": groups, "verified_at": 1}
-	}
-	encoded, err := common.Marshal(map[string]any{"version": 1, "tokens": tokens})
-	require.NoError(t, err)
-	path := filepath.Join(t.TempDir(), "bindings.json")
-	require.NoError(t, os.WriteFile(path, encoded, 0600))
-	t.Setenv("BRANCH_TOKEN_BINDINGS_FILE", path)
-}
 
 func (f branchCatalogTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
@@ -114,7 +88,6 @@ func TestBranchCatalogDeleteAuthorizationAndVersionGuard(t *testing.T) {
 }
 
 func TestBranchCatalogSaveAllowsSharedDirectoryGroupsWithoutOverwritingOwners(t *testing.T) {
-	setupBranchTokenBindings(t)
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Log{}, &model.AuditLog{}))
 	first, err := model.SaveBranchCatalogGroupsKey(0, []string{"a", "b"}, "sk-aaaa-private-first-1111")
@@ -157,7 +130,6 @@ func TestBranchCatalogSaveAllowsSharedDirectoryGroupsWithoutOverwritingOwners(t 
 }
 
 func TestBranchCatalogKeyConfiguration(t *testing.T) {
-	setupBranchTokenBindings(t)
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Log{}, &model.AuditLog{}))
 	originalTransport := http.DefaultTransport
@@ -233,8 +205,7 @@ func TestBranchCatalogScopesAccountDirectoryToBoundGroup(t *testing.T) {
 	}
 }
 
-func TestBranchCatalogUsesVerifiedGroupsNotDirectoryAssociations(t *testing.T) {
-	setupBranchTokenBindings(t)
+func TestBranchCatalogUsesUpstreamDirectoryWithoutLocalApproval(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Log{}, &model.AuditLog{}))
 	original := http.DefaultTransport
@@ -261,14 +232,14 @@ func TestBranchCatalogUsesVerifiedGroupsNotDirectoryAssociations(t *testing.T) {
 	require.NoError(t, db.First(&source).Error)
 	require.Equal(t, []string{"images", "videos"}, model.BranchCatalogBoundGroups(&source))
 
-	// A replacement must use its own verified scope, not the directory union.
+	// A replacement follows the current API directory, not a local key registry.
 	first, err := model.SaveBranchCatalogGroupsKey(0, []string{"single"}, "single-key")
 	require.NoError(t, err)
 	http.DefaultTransport = branchCatalogTransport(func(r *http.Request) (*http.Response, error) {
 		if r.URL.Path == "/v1/models" {
 			return branchCatalogModelsResponse(t, r, "single-model"), nil
 		}
-		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"success":true,"data":{"catalog_version":"v2","models":[{"model_name":"single-model","sync_enabled":true,"group_ratios":{"single":1,"outside":3}}]}}`)), Request: r}, nil
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"success":true,"data":{"catalog_version":"v2","models":[{"model_name":"single-model","sync_enabled":true,"group_ratios":{"single":1}}]}}`)), Request: r}, nil
 	})
 	w = httptest.NewRecorder()
 	c, _ = gin.CreateTestContext(w)
@@ -294,7 +265,6 @@ func TestBranchCatalogUsesVerifiedGroupsNotDirectoryAssociations(t *testing.T) {
 }
 
 func TestBranchMultiGroupCatalogIsAdvisoryAndCanBeImported(t *testing.T) {
-	setupBranchTokenBindings(t)
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Log{}, &model.AuditLog{}))
 	model.InitOptionMap()
@@ -303,7 +273,7 @@ func TestBranchMultiGroupCatalogIsAdvisoryAndCanBeImported(t *testing.T) {
 	var parent model.Channel
 	require.NoError(t, db.First(&parent, parentID).Error)
 	catalog := branchCatalog{Version: "v1", Models: []branchCatalogItem{
-		{Pricing: model.Pricing{ModelName: "shared", QuotaType: 1, ModelPrice: 0.5, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeImageGeneration}}, ModelType: "image", SyncEnabled: true, GroupRatios: map[string]float64{"a": 1, "b": 2, "outside": 3}},
+		{Pricing: model.Pricing{ModelName: "shared", QuotaType: 1, ModelPrice: 0.5, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeImageGeneration}}, ModelType: "image", SyncEnabled: true, GroupRatios: map[string]float64{"a": 1, "b": 2}},
 		{Pricing: model.Pricing{ModelName: "unique", QuotaType: 1, ModelPrice: 0.4}, ModelType: "image", SyncEnabled: true, GroupRatios: map[string]float64{"b": 2}},
 	}}
 	original := http.DefaultTransport
@@ -395,7 +365,6 @@ func TestBranchCatalogConflictsAcrossSavedTokens(t *testing.T) {
 }
 
 func TestBranchCatalogApplyExplicitOneUpdatesOldPrice(t *testing.T) {
-	setupBranchTokenBindings(t)
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Log{}, &model.AuditLog{}))
 	model.InitOptionMap()
@@ -456,7 +425,6 @@ func TestBranchCatalogApplyExplicitOneUpdatesOldPrice(t *testing.T) {
 }
 
 func TestBranchCatalogSameModelSyncsDistinctGroupsWithCommittedVersions(t *testing.T) {
-	setupBranchTokenBindings(t)
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Log{}, &model.AuditLog{}))
 	model.InitOptionMap()
@@ -472,7 +440,10 @@ func TestBranchCatalogSameModelSyncsDistinctGroupsWithCommittedVersions(t *testi
 		if r.URL.Path == "/v1/models" {
 			return branchCatalogModelsResponse(t, r, "shared-group-model"), nil
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"success":true,"data":{"catalog_version":"same","models":[{"model_name":"shared-group-model","model_type":"image","sync_enabled":true,"quota_type":1,"model_price":0.5,"supported_endpoint_types":["image-generation"],"group_ratios":{"group-a":0.11,"group-b":0.5}}]}}`)), Request: r}, nil
+		group := strings.TrimSuffix(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), "-key")
+		ratio := map[string]float64{"group-a": 0.11, "group-b": 0.5}[group]
+		body := fmt.Sprintf(`{"success":true,"data":{"catalog_version":"same","models":[{"model_name":"shared-group-model","model_type":"image","sync_enabled":true,"quota_type":1,"model_price":0.5,"supported_endpoint_types":["image-generation"],"group_ratios":{"%s":%g}}]}}`, group, ratio)
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 	})
 	call := func(handler func(*gin.Context), body any) *httptest.ResponseRecorder {
 		encoded, err := common.Marshal(body)
@@ -560,7 +531,6 @@ func TestRequestBranchCatalogKeepsOnlyAPIKeyModelsAndGroups(t *testing.T) {
 }
 
 func TestBranchCatalogRemovedTokenModelDoesNotConflictWithSavedGroup(t *testing.T) {
-	setupBranchTokenBindings(t)
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Log{}, &model.AuditLog{}))
 	ownerID, err := model.SaveBranchCatalogGroupKey(0, "image-group", "sk-owner-private-1111")
@@ -625,7 +595,6 @@ func TestBranchCatalogTokenModelsFailureNeverUsesAccountDirectory(t *testing.T) 
 }
 
 func TestBranchCatalogRefreshPrunesOnlyAfterAValidCompleteSnapshot(t *testing.T) {
-	setupBranchTokenBindings(t)
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Option{}))
 	id, err := model.SaveBranchCatalogGroupKey(0, "refresh", "test-refresh-key")
