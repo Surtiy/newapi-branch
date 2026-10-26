@@ -1,5 +1,5 @@
 export const meta = {
-  apiVersion: 1, key: 'aicost-branch', name: 'AICost 主站视频', version: '1.0.1',
+  apiVersion: 1, key: 'aicost-branch', name: 'AICost 主站视频', version: '1.0.2',
   author: { name: 'AICost' }, models: ['aicost-branch-video'], fetchMode: 'per_task',
   usageSchema: { seconds: { type: 'number', unit: 'second' } },
   protocols: ['openai_video'],
@@ -54,8 +54,11 @@ export function parseTaskResult(_ctx, raw) {
   const status = String(body.status || '').toLowerCase();
   if (['completed', 'succeeded', 'success'].includes(status)) {
     const url = videoURL(body);
-    if (!url) return { status: 'UNKNOWN', reason: '主站任务完成但成片地址尚未返回' };
-    return { status: 'SUCCESS', progress: '100%', url };
+    // A completed task can expose its bytes only through the content endpoint.
+    // Do not keep polling (and eventually refund) solely because no URL exists.
+    const result = { status: 'SUCCESS', progress: '100%' };
+    if (url) result.url = url;
+    return result;
   }
   if (['failed', 'failure', 'cancelled', 'canceled', 'expired'].includes(status)) return { status: 'FAILURE', progress: '100%', reason: '主站视频生成失败' };
   if (['queued', 'pending', 'not_start', 'submitted', 'submitting'].includes(status)) return { status: 'QUEUED', progress: '0%' };
@@ -85,11 +88,18 @@ export function listArtifacts(task) {
 }
 
 export function buildContentRequest(ctx) {
-  let data = ctx.data || {};
-  if (data.data && data.data.task_id && data.data.data) data = data.data.data;
-  const url = videoURL(data);
-  if (ctx.artifactKey !== 'video' || !url) throw new Error('artifact_not_found');
-  return { url, method: ctx.clientRequest.method, credentialless: true };
+  if (ctx.artifactKey !== 'video') throw new Error('artifact_not_found');
+  // Resolve bytes by the persisted upstream id, not a public branch task id or
+  // an expiring URL returned by a poll. The host streams this response directly
+  // and restricts credentialed requests/redirects to the channel origin.
+  const baseUrl = String(ctx.baseUrl || '').replace(/\/+$/, '');
+  const upstreamTaskId = String(ctx.upstreamTaskId || '').trim();
+  if (!baseUrl || !upstreamTaskId) throw new Error('upstream content context is required');
+  return {
+    url: baseUrl + '/v1/videos/' + encodeURIComponent(upstreamTaskId) + '/content',
+    method: ctx.clientRequest.method,
+    headers: { Authorization: 'Bearer ' + ctx.apiKey },
+  };
 }
 
 export const protocols = {

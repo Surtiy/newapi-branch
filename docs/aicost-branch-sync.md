@@ -123,12 +123,45 @@ factory key hides the bundled plugin, not an independently enabled override;
 turning off the global switch hides both. The application does not re-enable
 an explicitly disabled plugin during startup or synchronization.
 
+### Streaming video content (factory 1.0.2)
+
+The branch does not download completed videos to disk or require an artifact
+store. Clients request `GET|HEAD /v1/videos/{branchTaskId}/content`; the plugin
+uses the persisted **upstream** task id to call the channel's
+`/v1/videos/{upstreamTaskId}/content` with its upstream Bearer credential. The
+host relays the response as a stream, preserving Range/206 and media headers.
+The caller's branch API key is not forwarded upstream. Completion without a
+`video_url` is valid and no longer remains pending until a polling failure.
+
+The upstream must implement the authenticated content endpoint and return
+video bytes, not a JSON wrapper. Poll-result URLs are not used for downloads:
+they may expire, require credentials, or point to a different origin. Existing
+same-origin validation, SSRF protection, task ownership checks and credentialed
+cross-origin redirect rejection remain in force. An upstream that redirects
+content to a different CDN origin must stream the content itself or use an
+explicitly reviewed adapter; this update does not relax redirect policy.
+
+This change only addresses video result retrieval. It does not add assets
+upload, asynchronous image polling, video upscaling parameters, or optional
+pricing/model-plaza endpoints. Existing administrator-owned plugin overrides
+must be upgraded intentionally or removed to use the updated factory; building
+a new image alone does not replace an override. No running service is updated
+by a Git push.
+
+Security review references: OWASP ASVS 5.0.0 (4.1.1 response content types,
+12.3.1 encrypted outbound transport, 12.3.2 TLS certificate validation), and
+the OWASP Authentication, Session Management, REST Security and SSRF Prevention
+Cheat Sheets. This focused change retains the host transport and authorization
+policies; use an HTTPS channel base URL in production. It is not a claim of
+full-system ASVS compliance.
+
 ## Focused Regression Tests
 
 Backend tests can be run from the repository root with:
 
 ```sh
 go test -p 1 ./plugins -run '^TestBuiltIn' -count=1
+go test -p 1 ./controller -run 'Test(AICostBranchVideoContent|TaskArtifactAuthorization|TaskArtifactAccess|ProxyTaskMedia|TaskMedia|CredentiallessTaskMedia|SelfTaskMedia)' -count=1
 go test -p 1 ./controller ./model -run 'Test(Branch|RequestBranchCatalog|ScopeBranchCatalog|VideoBillingExpression)' -count=1
 node --test branch-plugin.test.mjs
 ```

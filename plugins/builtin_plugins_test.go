@@ -133,6 +133,31 @@ func TestBuiltInAICostBranchOverrideFallbackAndSwitches(t *testing.T) {
 	assert.Same(t, factory, active)
 }
 
+func TestBuiltInAICostBranchContentOnlyCompletion(t *testing.T) {
+	source, err := Source("aicost-branch")
+	require.NoError(t, err)
+	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{})
+	require.NoError(t, err)
+	for _, status := range []string{"completed", "succeeded", "success"} {
+		value, err := plugin.Engine.Call(t.Context(), "parseTaskResult", map[string]any{}, map[string]any{"status": status})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"status": "SUCCESS", "progress": "100%"}, value)
+	}
+	for _, method := range []string{"GET", "HEAD"} {
+		value, err := plugin.Engine.Call(t.Context(), "buildContentRequest", map[string]any{
+			"taskId": "public-branch-id", "upstreamTaskId": "upstream/id?#",
+			"artifactKey": "video", "baseUrl": "https://upstream.example/gateway/", "apiKey": "test-key",
+			"data":          map[string]any{"status": "completed", "video_url": "https://untrusted.example/expired.mp4"},
+			"clientRequest": map[string]any{"method": method},
+		})
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{
+			"url":    "https://upstream.example/gateway/v1/videos/upstream%2Fid%3F%23/content",
+			"method": method, "headers": map[string]any{"Authorization": "Bearer test-key"},
+		}, value)
+	}
+}
+
 func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing.T) {
 	generation := jsplugin.DefaultRegistry.Generation()
 	require.NotNil(t, generation)

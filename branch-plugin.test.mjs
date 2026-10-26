@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildContentRequest, extractUsageOnComplete, parseTaskResult } from './plugins/tasks/aicost-branch/plugin.js';
+import { buildContentRequest, extractUsageOnComplete, listArtifacts, parseTaskResult } from './plugins/tasks/aicost-branch/plugin.js';
 
 for (const status of ['failed', 'failure', 'cancelled', 'canceled', 'expired']) {
   test(`outer ${status} overrides request metadata and stale nested status`, () => {
@@ -34,9 +34,10 @@ test('outer running status and progress have precedence', () => {
   assert.deepEqual(parseTaskResult({}, { status: 'processing', progress: '80%', data: { status: 'queued' } }), { status: 'IN_PROGRESS', progress: '80%' });
 });
 
-test('unknown and missing result URL remain unknown', () => {
-  assert.equal(parseTaskResult({}, { status: 'succeeded', data: { seconds: 5 } }).status, 'UNKNOWN');
+test('completed tasks need no public result URL; missing status stays unknown', () => {
+  assert.deepEqual(parseTaskResult({}, { status: 'succeeded', data: { seconds: 5 } }), { status: 'SUCCESS', progress: '100%' });
   assert.equal(parseTaskResult({}, null).status, 'UNKNOWN');
+  assert.equal(parseTaskResult({}, { video_url: 'https://example.invalid/video.mp4' }).status, 'UNKNOWN');
 });
 
 test('actual completion usage can live in nested request metadata', () => {
@@ -46,6 +47,30 @@ test('actual completion usage can live in nested request metadata', () => {
   assert.deepEqual(extractUsageOnComplete({}, {}, { status: 'completed' }), {});
 });
 
-test('content proxy resolves the outer common result URL', () => {
-  assert.deepEqual(buildContentRequest({ data: { status: 'succeeded', result_url: 'https://example.invalid/final.mp4', data: { seconds: 5 } }, artifactKey: 'video', clientRequest: { method: 'HEAD' } }), { url: 'https://example.invalid/final.mp4', method: 'HEAD', credentialless: true });
+for (const method of ['GET', 'HEAD']) {
+  for (const data of [
+    { status: 'completed' },
+    { status: 'completed', result_url: 'https://cdn.example.invalid/expired.mp4' },
+    { data: { id: 'ignored-id', status: 'completed', video_url: 'https://untrusted.example.invalid/content' } },
+  ]) {
+    test(`content ${method} uses channel credentials and upstream id (${JSON.stringify(data)})`, () => {
+      assert.deepEqual(buildContentRequest({ baseUrl: 'https://upstream.example.invalid/gateway/', apiKey: 'test-upstream-key', taskId: 'public-branch-id', upstreamTaskId: 'upstream/id?#', data, artifactKey: 'video', clientRequest: { method } }), {
+        url: 'https://upstream.example.invalid/gateway/v1/videos/upstream%2Fid%3F%23/content', method, headers: { Authorization: 'Bearer test-upstream-key' },
+      });
+    });
+  }
+}
+
+test('completed content-only tasks expose video artifacts', () => {
+  const result = parseTaskResult({}, { data: { status: 'completed' } });
+  assert.deepEqual(listArtifacts({ status: result.status }), [{ key: 'video', type: 'video' }]);
+  assert.deepEqual(listArtifacts({ status: 'IN_PROGRESS' }), []);
+  assert.deepEqual(listArtifacts({ status: 'FAILURE' }), []);
+});
+
+test('content requests reject unknown artifacts and missing private context', () => {
+  const ctx = { baseUrl: 'https://upstream.example.invalid', upstreamTaskId: 'upstream-id', apiKey: 'test-key', artifactKey: 'video', clientRequest: { method: 'GET' } };
+  assert.throws(() => buildContentRequest({ ...ctx, artifactKey: 'image' }), /artifact_not_found/);
+  assert.throws(() => buildContentRequest({ ...ctx, upstreamTaskId: undefined, taskId: 'public-id' }), /upstream content context/);
+  assert.throws(() => buildContentRequest({ ...ctx, baseUrl: undefined }), /upstream content context/);
 });
