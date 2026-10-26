@@ -769,6 +769,51 @@ type scriptedBatchPollingAdaptor struct {
 	results map[string]*BatchTaskResult
 }
 
+type completionWaitPollingAdaptor struct {
+	scriptedPollingAdaptor
+	checks int
+}
+
+func (a *completionWaitPollingAdaptor) CheckTaskCompletion(_ *model.Task, result *relaycommon.TaskInfo) {
+	a.checks++
+	result.Status = model.TaskStatusInProgress
+	result.Progress = "99%"
+	result.Url = ""
+}
+
+func TestCommonVideoCompletionWaitsWithoutSettlementOrRefund(t *testing.T) {
+	truncate(t)
+	const userID, tokenID, channelID = 511, 511, 511
+	seedUser(t, userID, 10_000)
+	seedToken(t, tokenID, userID, "sk-media-wait", 7_000)
+	task := makeTask(userID, channelID, 4_000, tokenID, BillingSourceWallet, 0)
+	task.TaskID = "task_media_wait"
+	task.PrivateData.UpstreamTaskID = "upstream_media_wait"
+	task.PrivateData.PollFailures = 5
+	require.NoError(t, model.DB.Create(task).Error)
+	body, err := common.Marshal(taskdto.TaskResponse[model.Task]{
+		Code: taskdto.TaskSuccessCode,
+		Data: model.Task{TaskID: "upstream_media_wait", Status: model.TaskStatusSuccess, Progress: "100%"},
+	})
+	require.NoError(t, err)
+	adaptor := &completionWaitPollingAdaptor{scriptedPollingAdaptor: scriptedPollingAdaptor{body: body}}
+	ch := &model.Channel{Id: channelID, Type: constant.ChannelTypeTaskPlugin, Key: "test-key"}
+	for range 2 {
+		require.NoError(t, updateVideoSingleTask(context.Background(), adaptor, ch, task.GetUpstreamTaskID(), map[string]*model.Task{task.GetUpstreamTaskID(): task}))
+		var persisted model.Task
+		require.NoError(t, model.DB.First(&persisted, task.ID).Error)
+		assert.EqualValues(t, model.TaskStatusInProgress, persisted.Status)
+		assert.Equal(t, "99%", persisted.Progress)
+		assert.Zero(t, persisted.PrivateData.PollFailures)
+		assert.Zero(t, persisted.FinishTime)
+		assert.Equal(t, 4_000, persisted.Quota)
+		assert.Equal(t, 10_000, getUserQuota(t, userID))
+		assert.Equal(t, 7_000, getTokenRemainQuota(t, tokenID))
+		assert.Zero(t, countLogs(t))
+	}
+	assert.Equal(t, 2, adaptor.checks)
+}
+
 func (a *scriptedBatchPollingAdaptor) FetchMode() string { return "batch" }
 func (a *scriptedBatchPollingAdaptor) FetchBatchTasks(string, string, []*model.Task, string) (*http.Response, error) {
 	return a.FetchTask("", "", nil, "")

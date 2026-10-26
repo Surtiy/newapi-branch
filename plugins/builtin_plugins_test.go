@@ -139,6 +139,8 @@ func TestBuiltInAICostBranchContentOnlyCompletion(t *testing.T) {
 	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{})
 	require.NoError(t, err)
 	for _, status := range []string{"completed", "succeeded", "success"} {
+		// This synchronous parser returns a candidate; the adaptor probes content
+		// before this result may be persisted or used for successful settlement.
 		value, err := plugin.Engine.Call(t.Context(), "parseTaskResult", map[string]any{}, map[string]any{"status": status})
 		require.NoError(t, err)
 		assert.Equal(t, map[string]any{"status": "SUCCESS", "progress": "100%"}, value)

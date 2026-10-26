@@ -447,6 +447,7 @@ func updateVideoTasks(ctx context.Context, platform constant.TaskPlatform, chann
 	info := &relaycommon.RelayInfo{}
 	info.ChannelMeta = &relaycommon.ChannelMeta{
 		ChannelBaseUrl: cacheGetChannel.GetBaseURL(),
+		ChannelSetting: cacheGetChannel.GetSetting(),
 	}
 	info.ApiKey = cacheGetChannel.Key
 	adaptor.Init(info)
@@ -528,6 +529,11 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		taskResult.Progress = t.Progress
 		taskResult.Reason = t.FailReason
 		task.Data = t.Data
+		if checker, ok := adaptor.(interface {
+			CheckTaskCompletion(*model.Task, *relaycommon.TaskInfo)
+		}); ok {
+			checker.CheckTaskCompletion(task, taskResult)
+		}
 	} else if taskResult, err = adaptor.ParseTaskResult(task, resp, responseBody); err != nil {
 		return recordPollFailure(ctx, adaptor, task, snap.Status, pollClassHookError, resp.StatusCode, err.Error())
 	}

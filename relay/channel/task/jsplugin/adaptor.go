@@ -733,6 +733,7 @@ func (a *TaskAdaptor) ParseTaskResult(task *model.Task, resp *http.Response, bod
 		CompletionTokens: positiveInt(parsed.CompletionTokens),
 		TotalTokens:      positiveInt(parsed.TotalTokens),
 	}
+	a.CheckTaskCompletion(task, result)
 	if pluginState, present := encodeReturnedPluginState(value); present {
 		if len(pluginState) > maxTaskPluginPersistedJSONBytes {
 			logger.LogWarn(context.Background(), fmt.Sprintf("task plugin %s rejected oversized poll state (%d bytes)", a.plugin.Meta.Key, len(pluginState)))
@@ -758,6 +759,86 @@ func (a *TaskAdaptor) ParseTaskResult(task *model.Task, resp *http.Response, bod
 		time.Since(started).Milliseconds(),
 	)
 	return result, nil
+}
+
+// CheckTaskCompletion also guards the host's legacy common-response decoder,
+// which can otherwise skip ParseTaskResult entirely.
+func (a *TaskAdaptor) CheckTaskCompletion(task *model.Task, result *relaycommon.TaskInfo) {
+	if result.Status != string(model.TaskStatusSuccess) || !a.hasHook(context.Background(), "buildCompletionCheckRequest") {
+		return
+	}
+	key, baseURL, proxy := a.queryCredentials()
+	ctx, err := a.queryContext(task, key, baseURL, proxy)
+	if err == nil && a.completionVideoReady(ctx, baseURL, proxy) {
+		return
+	}
+	// Unavailable media is a normal wait, not a failed generation or poll.
+	// The existing outer task timeout/refund remains the final deadline.
+	result.Status = string(model.TaskStatusInProgress)
+	result.Progress = "99%"
+	result.Reason = "等待上游视频文件就绪"
+	result.Url = ""
+	result.RemoteUrl = ""
+}
+
+// completionVideoReady only samples the content stream; it never stores media
+// or follows redirects carrying upstream credentials to another destination.
+func (a *TaskAdaptor) completionVideoReady(ctx map[string]any, baseURL, proxy string) bool {
+	value, err := a.plugin.Engine.Call(context.Background(), "buildCompletionCheckRequest", ctx)
+	if err != nil {
+		return false
+	}
+	var descriptor requestDescriptor
+	if convert(value, &descriptor) != nil || descriptor.Method != http.MethodGet || descriptor.Body != nil {
+		return false
+	}
+	if pluginruntime.ValidateRequestURL(descriptor.URL, baseURL, nil) != nil || service.ValidateSSRFProtectedFetchURL(descriptor.URL) != nil {
+		return false
+	}
+	target, err := url.Parse(descriptor.URL)
+	base, baseErr := url.Parse(baseURL)
+	if err != nil || baseErr != nil || target.User != nil || target.Fragment != "" ||
+		(target.Scheme != "http" && target.Scheme != "https") || !strings.EqualFold(target.Scheme, base.Scheme) {
+		return false
+	}
+	probeContext, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(probeContext, http.MethodGet, descriptor.URL, nil)
+	if err != nil {
+		return false
+	}
+	for name, value := range descriptor.Headers {
+		req.Header.Set(name, value)
+	}
+	req.Header.Set("Range", "bytes=0-511")
+	req.Header.Set("Accept", "video/*")
+	req.Header.Set("Accept-Encoding", "identity")
+	client := service.GetSSRFProtectedHTTPClient()
+	if proxy != "" {
+		client, err = service.GetHttpClientWithProxy(proxy)
+		if err != nil {
+			return false
+		}
+	}
+	if client == nil {
+		return false
+	}
+	probeClient := *client
+	probeClient.CheckRedirect = func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := probeClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
+		return false
+	}
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || (!strings.HasPrefix(mediaType, "video/") && mediaType != "application/octet-stream") {
+		return false
+	}
+	prefix, err := io.ReadAll(io.LimitReader(resp.Body, 512))
+	return err == nil && len(prefix) > 0 && strings.HasPrefix(http.DetectContentType(prefix), "video/")
 }
 
 func (a *TaskAdaptor) applyCompletionUsageFacts(result *relaycommon.TaskInfo, facts any) {

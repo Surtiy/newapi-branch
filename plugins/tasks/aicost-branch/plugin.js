@@ -1,5 +1,5 @@
 export const meta = {
-  apiVersion: 1, key: 'aicost-branch', name: 'AICost 主站视频', version: '1.0.2',
+  apiVersion: 1, key: 'aicost-branch', name: 'AICost 主站视频', version: '1.0.3',
   author: { name: 'AICost' }, models: ['aicost-branch-video'], fetchMode: 'per_task',
   usageSchema: { seconds: { type: 'number', unit: 'second' } },
   protocols: ['openai_video'],
@@ -54,8 +54,8 @@ export function parseTaskResult(_ctx, raw) {
   const status = String(body.status || '').toLowerCase();
   if (['completed', 'succeeded', 'success'].includes(status)) {
     const url = videoURL(body);
-    // A completed task can expose its bytes only through the content endpoint.
-    // Do not keep polling (and eventually refund) solely because no URL exists.
+    // This is a candidate completion. The host runs buildCompletionCheckRequest
+    // and verifies video bytes before persisting SUCCESS or settling billing.
     const result = { status: 'SUCCESS', progress: '100%' };
     if (url) result.url = url;
     return result;
@@ -100,6 +100,13 @@ export function buildContentRequest(ctx) {
     method: ctx.clientRequest.method,
     headers: { Authorization: 'Bearer ' + ctx.apiKey },
   };
+}
+
+export function buildCompletionCheckRequest(ctx) {
+  return buildContentRequest({
+    baseUrl: ctx.baseUrl, upstreamTaskId: ctx.taskId, apiKey: ctx.apiKey,
+    artifactKey: 'video', clientRequest: { method: 'GET' },
+  });
 }
 
 export const protocols = {

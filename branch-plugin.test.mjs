@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildContentRequest, extractUsageOnComplete, listArtifacts, parseTaskResult } from './plugins/tasks/aicost-branch/plugin.js';
+import { buildCompletionCheckRequest, buildContentRequest, extractUsageOnComplete, listArtifacts, parseTaskResult } from './plugins/tasks/aicost-branch/plugin.js';
 
 for (const status of ['failed', 'failure', 'cancelled', 'canceled', 'expired']) {
   test(`outer ${status} overrides request metadata and stale nested status`, () => {
@@ -34,10 +34,16 @@ test('outer running status and progress have precedence', () => {
   assert.deepEqual(parseTaskResult({}, { status: 'processing', progress: '80%', data: { status: 'queued' } }), { status: 'IN_PROGRESS', progress: '80%' });
 });
 
-test('completed tasks need no public result URL; missing status stays unknown', () => {
+test('completed without URL is a candidate for the host media check; missing status stays unknown', () => {
   assert.deepEqual(parseTaskResult({}, { status: 'succeeded', data: { seconds: 5 } }), { status: 'SUCCESS', progress: '100%' });
   assert.equal(parseTaskResult({}, null).status, 'UNKNOWN');
   assert.equal(parseTaskResult({}, { video_url: 'https://example.invalid/video.mp4' }).status, 'UNKNOWN');
+});
+
+test('completion probe uses the private polling task id and upstream credentials', () => {
+  assert.deepEqual(buildCompletionCheckRequest({ baseUrl: 'https://upstream.example.invalid', taskId: 'upstream/id', publicTaskId: 'branch-id', apiKey: 'test-key' }), {
+    url: 'https://upstream.example.invalid/v1/videos/upstream%2Fid/content', method: 'GET', headers: { Authorization: 'Bearer test-key' },
+  });
 });
 
 test('actual completion usage can live in nested request metadata', () => {
@@ -61,7 +67,7 @@ for (const method of ['GET', 'HEAD']) {
   }
 }
 
-test('completed content-only tasks expose video artifacts', () => {
+test('host-approved completed tasks expose video artifacts without a result URL', () => {
   const result = parseTaskResult({}, { data: { status: 'completed' } });
   assert.deepEqual(listArtifacts({ status: result.status }), [{ key: 'video', type: 'video' }]);
   assert.deepEqual(listArtifacts({ status: 'IN_PROGRESS' }), []);

@@ -123,15 +123,31 @@ factory key hides the bundled plugin, not an independently enabled override;
 turning off the global switch hides both. The application does not re-enable
 an explicitly disabled plugin during startup or synchronization.
 
-### Streaming video content (factory 1.0.2)
+### Streaming video content and completion checks (factory 1.0.3)
 
 The branch does not download completed videos to disk or require an artifact
 store. Clients request `GET|HEAD /v1/videos/{branchTaskId}/content`; the plugin
 uses the persisted **upstream** task id to call the channel's
 `/v1/videos/{upstreamTaskId}/content` with its upstream Bearer credential. The
 host relays the response as a stream, preserving Range/206 and media headers.
-The caller's branch API key is not forwarded upstream. Completion without a
-`video_url` is valid and no longer remains pending until a polling failure.
+The caller's branch API key is not forwarded upstream.
+
+**Success requires both a completed upstream status and readable video bytes.**
+The synchronous plugin parser returns a candidate completion; the host's
+optional `buildCompletionCheckRequest` gate then samples the upstream content
+using an authenticated GET with `Range: bytes=0-511` and an eight-second deadline.
+Only HTTP 200/206 with a video or generic binary MIME type, a nonempty body and
+a recognized video signature can complete the task. A `video_url` string or a
+successful HEAD alone is not proof. JSON, HTML, empty streams, redirects and
+temporary download errors leave the task in progress at 99%, without settling
+success, consuming poll-failure retries or submitting another paid generation.
+The existing outer timeout/refund remains in force. A later successful probe
+allows normal settlement. Probing reads at most 512 bytes and never stores the
+file; it does not validate the entire video or guarantee future URL availability.
+This guard also runs for the host's legacy common-response decoder.
+
+This version requires the updated host binary as well as the plugin. Importing
+the new JavaScript alone into an older host does not install the completion gate.
 
 The upstream must implement the authenticated content endpoint and return
 video bytes, not a JSON wrapper. Poll-result URLs are not used for downloads:
@@ -161,6 +177,8 @@ Backend tests can be run from the repository root with:
 
 ```sh
 go test -p 1 ./plugins -run '^TestBuiltIn' -count=1
+go test -p 1 ./relay/channel/task/jsplugin -run TestBranchVideoCompletion -count=1
+go test -p 1 ./service -run 'Test(CommonVideoCompletion|UpdateVideoSingleTaskPollClassification)' -count=1
 go test -p 1 ./controller -run 'Test(AICostBranchVideoContent|TaskArtifactAuthorization|TaskArtifactAccess|ProxyTaskMedia|TaskMedia|CredentiallessTaskMedia|SelfTaskMedia)' -count=1
 go test -p 1 ./controller ./model -run 'Test(Branch|RequestBranchCatalog|ScopeBranchCatalog|VideoBillingExpression)' -count=1
 node --test branch-plugin.test.mjs
