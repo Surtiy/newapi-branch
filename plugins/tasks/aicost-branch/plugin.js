@@ -1,5 +1,5 @@
 export const meta = {
-  apiVersion: 1, key: 'aicost-branch', name: 'AICost 主站视频', version: '1.0.3',
+  apiVersion: 1, key: 'aicost-branch', name: 'AICost 主站视频', version: '1.0.4',
   author: { name: 'AICost' }, models: ['aicost-branch-video'], fetchMode: 'per_task',
   usageSchema: { seconds: { type: 'number', unit: 'second' } },
   protocols: ['openai_video'],
@@ -12,6 +12,11 @@ export function buildSubmitRequest(ctx) {
   if (!ctx.model || ctx.model === 'aicost-branch-video') throw new Error('模型名称缺失');
   req.model = ctx.model;
   const headers = { Authorization: 'Bearer ' + ctx.apiKey };
+  const idempotencyKey = (ctx.requestHeaders || {})['Idempotency-Key'];
+  if (idempotencyKey) {
+    if (!/^[\x21-\x7e]{1,255}$/.test(idempotencyKey)) throw new Error('Idempotency-Key 格式无效');
+    headers['Idempotency-Key'] = idempotencyKey;
+  }
   if ((ctx.files || []).length) {
     const parts = Object.keys(req).map(key => ({ name: key, value: typeof req[key] === 'object' ? JSON.stringify(req[key]) : String(req[key]) }));
     for (const file of ctx.files) parts.push({ name: file.field, fileRef: file.ref, filename: file.filename });
@@ -71,8 +76,11 @@ export function parseTaskResult(_ctx, raw) {
 
 export function extractUsage(ctx) {
   const req = ctx.requestBody || {};
+  // Only a host-confirmed fixed tariff may omit duration. Never invent a
+  // duration for second-priced upscaling or trust a client-supplied flag.
+  if (String(ctx.model || '').includes('超分') && req.seconds === undefined && req.duration === undefined && ctx.allowMissingDuration === true) return {};
   const seconds = Number(req.seconds === undefined ? req.duration : req.seconds);
-  if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('请明确提供 seconds 视频时长');
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 3600) throw new Error('请明确提供 seconds 视频时长；按秒超分需提供源视频真实时长');
   return { seconds };
 }
 
@@ -125,11 +133,17 @@ export const protocols = {
         }
       } else throw new Error('JSON or multipart body required');
       req.model = ctx.model;
-      if (!String(req.prompt || '').trim()) throw new Error('prompt is required');
+      const upscale = String(ctx.model || '').includes('超分');
+      if (upscale) {
+        if (!Array.isArray(req.videos) || req.videos.length !== 1 || typeof req.videos[0] !== 'string' || !/^https?:\/\/[^\s]+$/i.test(req.videos[0])) throw new Error('超分需要 videos 中的一条视频 URL');
+        if (!['720p', '1080p', '2k', '4k'].includes(String(req.resolution || '').toLowerCase())) throw new Error('超分 resolution 无效');
+        if (![30, 60, 120, 240].includes(Number(req.fps))) throw new Error('超分 fps 无效');
+      } else if (!String(req.prompt || '').trim()) throw new Error('prompt is required');
+      if (upscale && req.seconds === undefined && req.duration === undefined) return { kind: 'submit', model: ctx.model, action: 'upscale', requestBody: req };
       const seconds = Number(req.seconds === undefined ? req.duration : req.seconds);
       if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 3600) throw new Error('请提供有效的 seconds 视频时长');
       req.seconds = seconds;
-      return { kind: 'submit', model: ctx.model, action: 'generate', requestBody: req };
+      return { kind: 'submit', model: ctx.model, action: upscale ? 'upscale' : 'generate', requestBody: req };
     },
     render(_ctx, task) {
       const states = { NOT_START: 'queued', SUBMITTED: 'queued', QUEUED: 'queued', IN_PROGRESS: 'in_progress', SUCCESS: 'completed', FAILURE: 'failed' };

@@ -7,14 +7,72 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBranchCanvasUpscaleBillingContext(t *testing.T) {
+	source, err := os.ReadFile("../../../../plugins/tasks/aicost-branch/plugin.js")
+	require.NoError(t, err)
+	plugin, err := pluginruntime.NewRegistry().Register(string(source), pluginruntime.Options{})
+	require.NoError(t, err)
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		if key == "billing_setting.billing_mode" || key == "billing_setting.billing_expr" {
+			saved[key] = value
+		}
+		return nil
+	}))
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(saved)) })
+	for _, tc := range []struct {
+		name, expression string
+		wantError        bool
+	}{
+		{"fixed", `tier("request", 0.8)`, false},
+		{"seconds", `tier("second", u("seconds") * 0.12)`, true},
+		{"dynamic-usage", `tier("request", u("seconds") * 0.8)`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exprs, err := common.Marshal(map[string]string{"example-视频超分": tc.expression})
+			require.NoError(t, err)
+			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{"billing_setting.billing_mode": `{"example-视频超分":"tiered_expr"}`, "billing_setting.billing_expr": string(exprs)}))
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://provider.example", ApiKey: "private-key"}, OriginModelName: "example-视频超分", TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+			adaptor := New(plugin)
+			adaptor.Init(info)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+			c.Request.Header.Set("Idempotency-Key", "upscale-client-id")
+			body := map[string]any{"model": "example-视频超分", "videos": []any{"https://cdn.example/source.mp4"}, "resolution": "1080p", "fps": 30, "allowMissingDuration": true}
+			c.Set("task_request", body)
+			facts, err := adaptor.ExtractUsageFactsValidated(c, info)
+			if tc.wantError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Empty(t, facts, "flat-price upscaling must not fabricate duration usage")
+			ratios, err := adaptor.EstimateBillingValidated(c, info)
+			require.NoError(t, err)
+			assert.Empty(t, ratios)
+			request, err := adaptor.buildSubmit(c, info)
+			require.NoError(t, err)
+			assert.Equal(t, "upscale-client-id", request.Headers["Idempotency-Key"])
+			assert.Equal(t, "https://provider.example/v1/videos", request.URL)
+			encoded, err := common.Marshal(request.Body)
+			require.NoError(t, err)
+			assert.NotContains(t, string(encoded), `"seconds"`)
+			assert.NotContains(t, string(encoded), `"prompt"`)
+		})
+	}
+}
 
 func TestBranchVideoCompletionRequiresReadableMedia(t *testing.T) {
 	source, err := os.ReadFile("../../../../plugins/tasks/aicost-branch/plugin.js")

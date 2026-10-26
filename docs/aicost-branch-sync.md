@@ -157,9 +157,8 @@ cross-origin redirect rejection remain in force. An upstream that redirects
 content to a different CDN origin must stream the content itself or use an
 explicitly reviewed adapter; this update does not relax redirect policy.
 
-This change only addresses video result retrieval. It does not add assets
-upload, asynchronous image polling, video upscaling parameters, or optional
-pricing/model-plaza endpoints. Existing administrator-owned plugin overrides
+That change only addressed video result retrieval; canvas additions in 1.0.4
+are described below. Existing administrator-owned plugin overrides
 must be upgraded intentionally or removed to use the updated factory; building
 a new image alone does not replace an override. No running service is updated
 by a Git push.
@@ -170,6 +169,120 @@ the OWASP Authentication, Session Management, REST Security and SSRF Prevention
 Cheat Sheets. This focused change retains the host transport and authorization
 policies; use an HTTPS channel base URL in production. It is not a claim of
 full-system ASVS compliance.
+
+### Canvas v0.4.98 compatibility (factory 1.0.4)
+
+The integration document's sections 2–10 describe the current client. Its
+section 1 is a future client configuration proposal, not additional gateway
+routes. Use the branch's public HTTPS root URL and a **branch user API key**.
+The main site, production prices and customer data are not changed by this
+source update. A new image contains the host routes and embedded plugin together;
+there is no separate upload service or manually installed adapter.
+
+* Existing Chat Completions/SSE, synchronous images, multipart image edits
+  (`image` / `image[]`), speech and Gemini-native routes remain in place.
+  Image integration uses the document's **synchronous** branch: a final
+  `data[].url` / `data[].b64_json` result. This release does **not** implement
+  asynchronous image acceptance/persistence or
+  `GET /v1/images/generations/{id}`. Configure an upstream offering synchronous
+  images; an arbitrary upstream's 202 image task is not converted into a
+  branch async task. No placeholder task IDs or premature success settlement
+  are added.
+* Ordinary video create/poll/content keep the public model name, complete
+  prompt, ratio/resolution aliases, `client_task_id`, `image_urls`,
+  `images_base64`, `video_urls`, `audio_urls` and `audios_base64`.
+  Media support/count limits still depend on the configured upstream model.
+  Video results are streamed, not saved locally. A completed upstream status
+  **and readable video bytes** are still required for branch completion.
+* A model name containing `超分` accepts the documented single `videos` URL,
+  resolution `720p`/`1080p`/`2K`/`4K` (case-insensitive validation) and fps
+  30/60/120/240 without inventing a prompt. Duration may be omitted **only**
+  when the host confirms the local model uses the importer's simple fixed
+  `tier("request", price)` tariff. For a second-priced or other tariff,
+  provide the real source `seconds`/`duration` (greater than 0, at most 3600);
+  missing duration fails validation before paid submission. The gateway does
+  not remotely probe source video duration/size. The client's 128 MiB/3600s
+  source limits also need enforcement by the configured upstream.
+  `Idempotency-Key` is forwarded after printable-ASCII/255-character validation;
+  this is **not** a new branch-wide idempotency or exactly-once billing store.
+  A query/refresh must not resubmit a generation.
+
+#### Reference upload, inside the same container
+
+`POST /v1/assets` requires the normal Bearer API key and exactly one multipart
+`file`. It returns `{"url":"https://branch.example/v1/assets/<random>.png"}`.
+Configure **ServerAddress** to the branch's public HTTPS root first: URLs are
+not built from an untrusted Host header, and localhost/private-IP addresses
+are rejected. The reverse proxy must accept 129 MiB request bodies if the full
+128 MiB file limit is needed.
+
+This stores **input reference material**, not generated videos. Storage is
+`canvas-assets/` under the process working directory (`/data/canvas-assets`
+in the bundled Docker image, covered by the existing `/data` mount).
+`CANVAS_ASSET_DIR` optionally selects a different dedicated persistent directory.
+Uploads require an existing enabled user/key, use the existing upload limiter,
+sniff allowed image/video/audio signatures, generate 128-bit random names,
+reject HTML/SVG/unknown types and enforce a 128 MiB file ceiling and a five-minute
+HTTP body read deadline. The single
+writer's pool admits at most 512 files and reserves space within 2 GiB. Incomplete
+uploads are removed. These limits are not a distributed multi-writer quota;
+use one upload writer or a reviewed object-storage adapter for multiple nodes.
+
+`GET|HEAD /v1/assets/{randomName}` supports Range/206 without a browser cookie
+so providers can fetch references. These are **public capability URLs**: anyone
+who receives the URL can read that material until it expires. Do not expose
+the storage directory as a static directory listing. Files expire after seven
+days; retrieval rejects expired files and the next upload removes expired
+owned files. Keep the full lifetime longer than upstream queuing/generation.
+No antivirus, full media-decoder validation, content moderation or cross-node
+quota system is implied. Keep references private through an appropriate
+object-storage integration if public capability URLs do not suit the deployment.
+
+#### Optional catalog and model information
+
+Both routes use **ordinary** `TokenAuth`, not administrator session auth:
+
+* `GET /api/distributor/models` returns
+  `{"success":true,"data":{"models":[...]}}`. The rows use **local branch
+  pricing after synchronization/multiplier**, effective token groups and token
+  model limits. Other groups and upstream keys are not returned. Simple imported
+  video tariffs expose their actual scalar `model_price`, `quota_type:1` and
+  `video_billing_unit:request|second`; custom expressions remain `tiered_expr`
+  instead of being misrepresented as a fixed price. Group/user-group ratios
+  are returned separately, not multiplied into the base price twice. These
+  remain directory estimates, not a promise of an exact parameterized charge.
+* `GET /api/usage/token/model-plaza?category=video` returns the same visible
+  model scope, descriptions and tag arrays. It currently explicitly returns
+  `has_success_rate:false` and omits `success_rate`; this branch has no token-scoped
+  aggregation behind this compatibility endpoint. No fabricated 0%/100% and no
+  other users' metrics are exposed. Window metadata is 120 minutes.
+
+These extensions are optional and are not called as generation prerequisites.
+Model capability advertising does not transform arbitrary provider protocols.
+
+Security references additionally include the OWASP File Upload Cheat Sheet
+(signature/size allowlists, generated names, non-webroot storage, authenticated
+uploads and controlled public retrieval). Tests exercise ordinary token access,
+missing/invalid keys, token group/model isolation, local tariff units, MIME
+rejection, path traversal, upload cleanup/expiry and Range/HEAD. The public
+reference URL and unavailable success-rate aggregation are explicit boundaries,
+not a full-system ASVS claim. No database schema or migration is changed.
+
+Validation on 2026-10-26: `node --test branch-plugin.test.mjs` passed 26 cases;
+`go test -p 1 ./plugins ./relay/channel/task/jsplugin ./router
+./setting/billing_setting -count=1` passed, as did focused controller/service
+video and model-list regressions, image multipart/response regressions, a full
+host build and `plugin lint`. A real local process served the new routes
+(unauthenticated catalog/upload 401; unknown asset GET/HEAD 404).
+`go test -p 1 ./controller -run '^TestCanvas' -count=1` passed on SQLite 3.50.4.
+`CANVAS_TEST_SQL_DSN=<disposable-canvas_compat_test-DSN> go test -p 1
+./controller -run '^TestCanvasCatalogOrdinaryTokenScopeAndBranchTariffs$'
+-count=1 -v` passed on PostgreSQL 16.15 and MySQL 8.0.46 using temporary isolated
+containers, then those containers/volumes were removed. This tests runtime
+catalog/auth queries, not a new migration. MySQL uses the test fixture's
+nullable TEXT token-group column: the existing production `Token.Groups`
+`TEXT DEFAULT ''` tag fails MySQL fresh-table creation (error 1101), an existing
+startup/migration limitation not changed or claimed fixed by this patch.
 
 ## Focused Regression Tests
 
@@ -182,6 +295,9 @@ go test -p 1 ./service -run 'Test(CommonVideoCompletion|UpdateVideoSingleTaskPol
 go test -p 1 ./controller -run 'Test(AICostBranchVideoContent|TaskArtifactAuthorization|TaskArtifactAccess|ProxyTaskMedia|TaskMedia|CredentiallessTaskMedia|SelfTaskMedia)' -count=1
 go test -p 1 ./controller ./model -run 'Test(Branch|RequestBranchCatalog|ScopeBranchCatalog|VideoBillingExpression)' -count=1
 node --test branch-plugin.test.mjs
+go test -p 1 ./controller -run '^TestCanvas' -count=1
+go test -p 1 ./relay/channel/task/jsplugin -run '^TestBranchCanvasUpscaleBillingContext$' -count=1
+go test -p 1 ./setting/billing_setting -run '^TestVideoCatalogTariff$' -count=1
 ```
 
 The model tests default to an isolated temporary SQLite database. Set

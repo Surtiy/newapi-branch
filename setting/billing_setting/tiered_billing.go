@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"regexp"
 	"sort"
+	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -15,6 +17,26 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/samber/lo"
 )
+
+// Only the importer's simple fixed/second tariffs have a truthful scalar
+// catalog price. Other expressions must remain parameter-priced, not guessed.
+var videoCatalogTariff = regexp.MustCompile(`^\s*(?:v1:)?\s*tier\(\s*"(request|second)"\s*,\s*(?:u\(\s*"seconds"\s*\)\s*\*\s*)?([0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)\s*\)\s*$`)
+
+func VideoCatalogTariff(expression string) (price float64, unit string, ok bool) {
+	match := videoCatalogTariff.FindStringSubmatch(expression)
+	if match == nil {
+		return 0, "", false
+	}
+	usesSeconds := billingexpr.UsedUsageKeys(expression)["seconds"]
+	if usesSeconds != (match[1] == "second") {
+		return 0, "", false
+	}
+	price, err := strconv.ParseFloat(match[2], 64)
+	if err != nil || math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
+		return 0, "", false
+	}
+	return price, match[1], true
+}
 
 const (
 	BillingModeRatio      = "ratio"

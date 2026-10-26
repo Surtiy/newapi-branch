@@ -12,6 +12,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestVideoCatalogTariff(t *testing.T) {
+	for _, tc := range []struct {
+		expr  string
+		price float64
+		unit  string
+		ok    bool
+	}{
+		{`tier("request", 0.012282)`, 0.012282, "request", true},
+		{`v1:tier("second", u("seconds") * 2e-3)`, 0.002, "second", true},
+		{`tier("request", 0)`, 0, "request", true},
+		{`tier("request", u("seconds") * 0.4)`, 0, "", false},
+		{`tier("second", 0.4)`, 0, "", false},
+		{`tier("request", 1) + u("seconds")`, 0, "", false},
+		{`tier("request", 1e999)`, 0, "", false},
+		{`tier("request", -1)`, 0, "", false},
+		{`tier("dynamic", u("resolution") == "4k" ? 2 : 1)`, 0, "", false},
+	} {
+		t.Run(tc.expr, func(t *testing.T) {
+			price, unit, ok := VideoCatalogTariff(tc.expr)
+			assert.Equal(t, tc.price, price)
+			assert.Equal(t, tc.unit, unit)
+			assert.Equal(t, tc.ok, ok)
+		})
+	}
+}
+
 func TestSmokeTestTaskExprValidatesDeclaredUsageVectors(t *testing.T) {
 	videoSchema := map[string]jsplugin.UsageFieldSchema{
 		"seconds": {Type: "number", Unit: "second"},

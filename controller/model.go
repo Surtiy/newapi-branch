@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -176,6 +177,9 @@ func buildOpenAIModel(modelName string, ownerByModel map[string]string) dto.Open
 		oaiModel.OwnedBy = owner
 	}
 	oaiModel.SupportedEndpointTypes = model.GetModelSupportEndpointTypes(modelName)
+	if target, ok := model.ResolveTaskModelAlias(jsplugin.DefaultRegistry.Generation(), modelName); ok && target.PluginKey == "aicost-branch" && !slices.Contains(oaiModel.SupportedEndpointTypes, constant.EndpointTypeOpenAIVideo) {
+		oaiModel.SupportedEndpointTypes = append(slices.Clone(oaiModel.SupportedEndpointTypes), constant.EndpointTypeOpenAIVideo)
+	}
 	return oaiModel
 }
 

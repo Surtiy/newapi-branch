@@ -1,6 +1,35 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildCompletionCheckRequest, buildContentRequest, extractUsageOnComplete, listArtifacts, parseTaskResult } from './plugins/tasks/aicost-branch/plugin.js';
+import { buildCompletionCheckRequest, buildContentRequest, buildSubmitRequest, extractUsage, extractUsageOnComplete, listArtifacts, parseTaskResult, protocols } from './plugins/tasks/aicost-branch/plugin.js';
+
+test('canvas video preserves all reference media, public model and client id', () => {
+  const input = { prompt: '完整提示词 @角色A', aspect_ratio: '16:9', ratio: '16:9', resolution: '720p', resolution_name: '720p', duration: 6, seconds: '6', client_task_id: 'canvas-unique-id', image_urls: ['https://cdn.example/a.png'], images_base64: ['data:image/png;base64,AAAA'], video_urls: ['https://cdn.example/v.mp4'], audio_urls: ['https://cdn.example/a.mp3'], audios_base64: ['data:audio/mpeg;base64,AAAA'] };
+  const decoded = protocols.openai_video.decodeRequest({ model: 'wan3.0-720p-custom', body: { kind: 'json', value: input } });
+  const sent = buildSubmitRequest({ model: decoded.model, requestBody: decoded.requestBody, baseUrl: 'https://upstream.example', apiKey: 'fixture' });
+  assert.deepEqual(sent.body, { ...input, model: 'wan3.0-720p-custom', seconds: 6 });
+});
+
+test('canvas upscale omits invented prompt and duration, only host-confirmed flat billing allows it', () => {
+  const body = { model: 'example-视频超分', videos: ['https://cdn.example/source.mp4'], resolution: '2K', fps: 60 };
+  const decoded = protocols.openai_video.decodeRequest({ model: body.model, body: { kind: 'json', value: body } });
+  assert.deepEqual(decoded, { kind: 'submit', model: body.model, action: 'upscale', requestBody: body });
+  assert.deepEqual(extractUsage({ model: body.model, requestBody: body, allowMissingDuration: true }), {});
+  assert.throws(() => extractUsage({ model: body.model, requestBody: { ...body, allowMissingDuration: true } }), /真实时长/);
+  assert.deepEqual(extractUsage({ model: body.model, requestBody: { ...body, duration: 12.4 } }), { seconds: 12.4 });
+  const sent = buildSubmitRequest({ model: body.model, requestBody: body, baseUrl: 'https://upstream.example', apiKey: 'fixture', requestHeaders: { 'Idempotency-Key': 'canvas-upscale-id' } });
+  assert.deepEqual(sent.body, body);
+  assert.equal(sent.headers['Idempotency-Key'], 'canvas-upscale-id');
+  assert.throws(() => buildSubmitRequest({ model: body.model, requestBody: body, requestHeaders: { 'Idempotency-Key': 'invalid\r\nInjected: value' } }), /Idempotency-Key/);
+});
+
+test('upscale input validation never loosens ordinary generation or second usage bounds', () => {
+  const decode = value => protocols.openai_video.decodeRequest({ model: value.model, body: { kind: 'json', value } });
+  const valid = { model: 'example-视频超分', videos: ['https://cdn.example/source.mp4'], resolution: '1080p', fps: 30 };
+  for (const override of [{ videos: [] }, { videos: ['file:///private'] }, { videos: ['https://cdn.example/1.mp4', 'https://cdn.example/2.mp4'] }, { resolution: '8K' }, { fps: 15 }, { seconds: 0 }, { seconds: 3601 }]) assert.throws(() => decode({ ...valid, ...override }));
+  assert.throws(() => decode({ model: 'wan3.0', seconds: 6 }), /prompt/);
+  assert.throws(() => decode({ model: 'wan3.0', prompt: 'test' }), /seconds/);
+  assert.throws(() => extractUsage({ requestBody: { seconds: 3601 } }), /seconds/);
+});
 
 for (const status of ['failed', 'failure', 'cancelled', 'canceled', 'expired']) {
   test(`outer ${status} overrides request metadata and stale nested status`, () => {

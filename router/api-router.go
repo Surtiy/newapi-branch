@@ -20,6 +20,8 @@ func SetApiRouter(router *gin.Engine) {
 	apiRouter.Use(middleware.BodyStorageCleanup()) // 清理请求体存储
 	apiRouter.Use(middleware.GlobalAPIRateLimit())
 	apiRouter.GET("/api-docs", controller.GetApiDocs)
+	apiRouter.GET("/distributor/models", middleware.TokenAuth(), controller.GetCanvasCatalog)
+	apiRouter.GET("/usage/token/model-plaza", middleware.TokenAuth(), controller.GetCanvasModelPlaza)
 	anonymousRequestBodyLimit := middleware.AnonymousRequestBodyLimit()
 	{
 		apiRouter.GET("/setup", controller.GetSetup)

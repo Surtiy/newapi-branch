@@ -29,6 +29,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -1314,6 +1315,7 @@ func (a *TaskAdaptor) submitContext(c *gin.Context, info *relaycommon.RelayInfo)
 			}
 			requestHeaders["Content-Type"] = c.GetHeader("Content-Type")
 			requestHeaders["Accept"] = c.GetHeader("Accept")
+			requestHeaders["Idempotency-Key"] = c.GetHeader("Idempotency-Key")
 			if strings.Contains(c.GetHeader("Content-Type"), "multipart/form-data") {
 				if form, err := common.ParseMultipartFormReusable(c); err == nil {
 					defer form.RemoveAll()
@@ -1358,6 +1360,11 @@ func (a *TaskAdaptor) submitContext(c *gin.Context, info *relaycommon.RelayInfo)
 	}
 	ctx["publicTaskId"] = info.PublicTaskID
 	ctx["model"] = info.OriginModelName
+	if a.plugin.Meta.Key == "aicost-branch" {
+		expression, _ := billing_setting.GetBillingExpr(info.OriginModelName)
+		_, unit, simple := billing_setting.VideoCatalogTariff(expression)
+		ctx["allowMissingDuration"] = billing_setting.GetBillingMode(info.OriginModelName) == billing_setting.BillingModeTieredExpr && simple && unit == "request"
+	}
 	ctx["upstreamModel"] = info.UpstreamModelName
 	ctx["baseUrl"] = info.ChannelBaseUrl
 	ctx["userSetting"] = info.UserSetting
