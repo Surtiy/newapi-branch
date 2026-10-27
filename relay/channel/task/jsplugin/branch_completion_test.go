@@ -1,9 +1,16 @@
 package jsplugin
 
 import (
+	"bytes"
+	"encoding/base64"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +25,108 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBranchVideoSubmitsOnlyReferenceURLs(t *testing.T) {
+	source, err := os.ReadFile("../../../../plugins/tasks/aicost-branch/plugin.js")
+	require.NoError(t, err)
+	plugin, err := pluginruntime.NewRegistry().Register(string(source), pluginruntime.Options{})
+	require.NoError(t, err)
+	original := system_setting.ServerAddress
+	system_setting.ServerAddress = "https://branch.example"
+	previousFetch := *system_setting.GetFetchSetting()
+	system_setting.GetFetchSetting().AllowPrivateIp = true
+	system_setting.GetFetchSetting().AllowedPorts = []string{"1-65535"}
+	t.Cleanup(func() { system_setting.ServerAddress = original; *system_setting.GetFetchSetting() = previousFetch })
+	service.InitHttpClient()
+	png := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0}, 32)...)
+	wav := append([]byte("RIFF\x24\x00\x00\x00WAVEfmt "), bytes.Repeat([]byte{0}, 32)...)
+	mp4 := []byte{0, 0, 0, 24, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 0, 0, 0, 0, 'i', 's', 'o', 'm', 'm', 'p', '4', '2'}
+	for _, format := range []string{"json-base64", "multipart"} {
+		t.Run(format, func(t *testing.T) {
+			directory := t.TempDir()
+			t.Setenv("CANVAS_ASSET_DIR", directory)
+			calls := 0
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				assert.Equal(t, "/v1/videos", r.URL.Path)
+				assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+				assert.Equal(t, "Bearer fixture-upstream-key", r.Header.Get("Authorization"))
+				var submitted map[string]any
+				require.NoError(t, common.DecodeJson(r.Body, &submitted))
+				assert.Equal(t, "video-2.5-101010", submitted["model"])
+				assert.Equal(t, "完整提示词 @图片1 @视频1 @音频1", submitted["prompt"])
+				assert.Equal(t, float64(4), submitted["seconds"])
+				for _, field := range []string{"images_base64", "audios_base64", "videos_base64"} {
+					assert.NotContains(t, submitted, field)
+				}
+				for field, expected := range map[string][]byte{"image_urls": png, "video_urls": mp4, "audio_urls": wav} {
+					values, ok := submitted[field].([]any)
+					require.True(t, ok, field)
+					require.NotEmpty(t, values)
+					for _, value := range values {
+						parsed, err := url.Parse(value.(string))
+						require.NoError(t, err)
+						assert.Equal(t, "https", parsed.Scheme)
+						assert.Equal(t, "branch.example", parsed.Hostname())
+						actual, err := os.ReadFile(filepath.Join(directory, filepath.Base(parsed.Path)))
+						require.NoError(t, err)
+						assert.Equal(t, expected, actual)
+					}
+				}
+				_, _ = io.WriteString(w, `{"id":"mock-upstream-task","status":"queued"}`)
+			}))
+			defer upstream.Close()
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Set("id", 7)
+			body := map[string]any{"model": "video-2.5-101010", "prompt": "完整提示词 @图片1 @视频1 @音频1", "seconds": 4}
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+			if format == "json-base64" {
+				for field, data := range map[string][]byte{"images_base64": png, "videos_base64": mp4, "audios_base64": wav} {
+					body[field] = []any{base64.StdEncoding.EncodeToString(data)}
+				}
+				c.Request.Header.Set("Content-Type", "application/json")
+			} else {
+				var input bytes.Buffer
+				writer := multipart.NewWriter(&input)
+				for _, item := range []struct {
+					field string
+					data  []byte
+				}{{"input_reference[]", png}, {"input_reference[]", png}, {"video", mp4}, {"audio", wav}} {
+					part, err := writer.CreateFormFile(item.field, "fixture.bin")
+					require.NoError(t, err)
+					_, err = part.Write(item.data)
+					require.NoError(t, err)
+				}
+				require.NoError(t, writer.Close())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", &input)
+				c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+			}
+			c.Set("task_request", body)
+			info := &relaycommon.RelayInfo{OriginModelName: "video-2.5-101010", ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: upstream.URL, ApiKey: "fixture-upstream-key"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+			adaptor := New(plugin)
+			adaptor.Init(info)
+			require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+			requestBody, err := adaptor.BuildRequestBody(c, info)
+			require.NoError(t, err)
+			response, err := adaptor.DoRequest(c, info, requestBody)
+			require.NoError(t, err)
+			defer response.Body.Close()
+			assert.Equal(t, http.StatusOK, response.StatusCode)
+			assert.Equal(t, 1, calls)
+			entries, err := os.ReadDir(directory)
+			require.NoError(t, err)
+			assert.Len(t, entries, map[string]int{"json-base64": 3, "multipart": 4}[format])
+			// Repeated validation/build uses the cached URL body, not another upload.
+			again, err := adaptor.BuildRequestBody(c, info)
+			require.NoError(t, err)
+			data, err := io.ReadAll(again)
+			require.NoError(t, err)
+			assert.NotContains(t, string(data), "base64")
+			assert.NotContains(t, string(data), "request_file:")
+			assert.False(t, strings.HasPrefix(string(data), "--"))
+		})
+	}
+}
 
 func TestBranchCanvasUpscaleBillingContext(t *testing.T) {
 	source, err := os.ReadFile("../../../../plugins/tasks/aicost-branch/plugin.js")

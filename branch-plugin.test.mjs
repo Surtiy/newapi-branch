@@ -2,11 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildCompletionCheckRequest, buildContentRequest, buildSubmitRequest, extractUsage, extractUsageOnComplete, listArtifacts, parseTaskResult, protocols } from './plugins/tasks/aicost-branch/plugin.js';
 
-test('canvas video preserves all reference media, public model and client id', () => {
-  const input = { prompt: '完整提示词 @角色A', aspect_ratio: '16:9', ratio: '16:9', resolution: '720p', resolution_name: '720p', duration: 6, seconds: '6', client_task_id: 'canvas-unique-id', image_urls: ['https://cdn.example/a.png'], images_base64: ['data:image/png;base64,AAAA'], video_urls: ['https://cdn.example/v.mp4'], audio_urls: ['https://cdn.example/a.mp3'], audios_base64: ['data:audio/mpeg;base64,AAAA'] };
+test('canvas video preserves host-published reference URLs, public model and client id', () => {
+  const input = { prompt: '完整提示词 @角色A', aspect_ratio: '16:9', ratio: '16:9', resolution: '720p', resolution_name: '720p', duration: 6, seconds: '6', client_task_id: 'canvas-unique-id', image_urls: ['https://cdn.example/a.png', 'https://branch.example/v1/assets/a.png'], video_urls: ['https://branch.example/v1/assets/v.mp4'], audio_urls: ['https://branch.example/v1/assets/a.mp3'] };
   const decoded = protocols.openai_video.decodeRequest({ model: 'wan3.0-720p-custom', body: { kind: 'json', value: input } });
   const sent = buildSubmitRequest({ model: decoded.model, requestBody: decoded.requestBody, baseUrl: 'https://upstream.example', apiKey: 'fixture' });
   assert.deepEqual(sent.body, { ...input, model: 'wan3.0-720p-custom', seconds: 6 });
+});
+
+test('video plugin rejects unprepared file bodies instead of forwarding multipart', () => {
+  assert.throws(() => buildSubmitRequest({ model: 'video-2.5-101010', requestBody: {prompt:'test',seconds:4}, files: [{field:'input_reference',ref:'request_file:input_reference'}] }), /转换为 URL/);
 });
 
 test('canvas upscale omits invented prompt and duration, only host-confirmed flat billing allows it', () => {

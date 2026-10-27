@@ -1,5 +1,5 @@
 export const meta = {
-  apiVersion: 1, key: 'aicost-branch', name: 'AICost 主站视频', version: '1.0.4',
+  apiVersion: 1, key: 'aicost-branch', name: 'AICost 主站视频', version: '1.0.5',
   author: { name: 'AICost' }, models: ['aicost-branch-video'], fetchMode: 'per_task',
   usageSchema: { seconds: { type: 'number', unit: 'second' } },
   protocols: ['openai_video'],
@@ -17,11 +17,9 @@ export function buildSubmitRequest(ctx) {
     if (!/^[\x21-\x7e]{1,255}$/.test(idempotencyKey)) throw new Error('Idempotency-Key 格式无效');
     headers['Idempotency-Key'] = idempotencyKey;
   }
-  if ((ctx.files || []).length) {
-    const parts = Object.keys(req).map(key => ({ name: key, value: typeof req[key] === 'object' ? JSON.stringify(req[key]) : String(req[key]) }));
-    for (const file of ctx.files) parts.push({ name: file.field, fileRef: file.ref, filename: file.filename });
-    return { url: ctx.baseUrl + '/v1/videos', method: 'POST', headers, bodyType: 'multipart', parts };
-  }
+  // The host publishes base64 and multipart references before this hook.
+  // Fail closed rather than accidentally forwarding unprepared binary files.
+  if ((ctx.files || []).length) throw new Error('参考文件尚未转换为 URL');
   headers['Content-Type'] = 'application/json';
   return { url: ctx.baseUrl + '/v1/videos', method: 'POST', headers, body: req };
 }

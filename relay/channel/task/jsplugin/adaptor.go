@@ -1201,7 +1201,20 @@ func (a *TaskAdaptor) buildSubmit(c *gin.Context, info *relaycommon.RelayInfo) (
 		return a.submit, nil
 	}
 	started := time.Now()
-	value, err := a.plugin.Engine.Call(c.Request.Context(), "buildSubmitRequest", a.submitContext(c, info))
+	submitContext := a.submitContext(c, info)
+	if a.plugin.Meta.Key == "aicost-branch" {
+		body, ok := submitContext["requestBody"].(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("video request must be an object")
+		}
+		prepared, err := service.NormalizeCanvasVideoReferences(c, body)
+		if err != nil {
+			return nil, err
+		}
+		submitContext["requestBody"] = prepared
+		submitContext["files"] = []map[string]any{}
+	}
+	value, err := a.plugin.Engine.Call(c.Request.Context(), "buildSubmitRequest", submitContext)
 	if err != nil {
 		logger.LogDebug(
 			c,
