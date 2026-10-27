@@ -56,6 +56,7 @@ func TestBranchVideoSubmitsOnlyReferenceURLs(t *testing.T) {
 				assert.Equal(t, "video-2.5-101010", submitted["model"])
 				assert.Equal(t, "完整提示词 @图片1 @视频1 @音频1", submitted["prompt"])
 				assert.Equal(t, float64(4), submitted["seconds"])
+				assert.Equal(t, map[string]any{"enabled": false, "mode": "light"}, submitted["face"])
 				for _, field := range []string{"images_base64", "audios_base64", "videos_base64"} {
 					assert.NotContains(t, submitted, field)
 				}
@@ -78,7 +79,7 @@ func TestBranchVideoSubmitsOnlyReferenceURLs(t *testing.T) {
 			defer upstream.Close()
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Set("id", 7)
-			body := map[string]any{"model": "video-2.5-101010", "prompt": "完整提示词 @图片1 @视频1 @音频1", "seconds": 4}
+			body := map[string]any{"model": "video-2.5-101010", "prompt": "完整提示词 @图片1 @视频1 @音频1", "seconds": 4, "face": map[string]any{"enabled": false, "mode": "light"}}
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
 			if format == "json-base64" {
 				for field, data := range map[string][]byte{"images_base64": png, "videos_base64": mp4, "audios_base64": wav} {
@@ -86,6 +87,7 @@ func TestBranchVideoSubmitsOnlyReferenceURLs(t *testing.T) {
 				}
 				c.Request.Header.Set("Content-Type", "application/json")
 			} else {
+				body["face"] = `{"enabled":false,"mode":"light"}`
 				var input bytes.Buffer
 				writer := multipart.NewWriter(&input)
 				for _, item := range []struct {

@@ -198,6 +198,19 @@ func NormalizeCanvasVideoReferences(c *gin.Context, body map[string]any) (result
 		}
 	}()
 	result = maps.Clone(body)
+	if c.Request != nil && strings.Contains(c.GetHeader("Content-Type"), "multipart/form-data") {
+		// These were JSON strings inside form fields. Once the upstream body is
+		// JSON, preserve their actual types (especially face.enabled=false).
+		for _, key := range []string{"face", "faceParams", "faceAnonymize", "人脸", "params", "video_config", "metadata"} {
+			if text, ok := result[key].(string); ok {
+				var value any
+				if err = common.UnmarshalJsonStr(text, &value); err != nil {
+					return nil, fmt.Errorf("%s 字段 JSON 无效", key)
+				}
+				result[key] = value
+			}
+		}
+	}
 	for _, key := range slices.Sorted(maps.Keys(result)) {
 		base := strings.TrimSuffix(key, "[]")
 		if base != key && canvasVideoMediaFields[base] != "" {
