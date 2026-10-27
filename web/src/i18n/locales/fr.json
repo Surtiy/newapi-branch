@@ -6165,6 +6165,7 @@
     "Per second": "Par seconde",
     "Billing unit": "Unité de facturation",
     "per second": "par seconde",
-    "Main site models or groups changed. Please sync.": "Les modèles ou groupes du site principal ont changé. Veuillez synchroniser."
+    "Main site models or groups changed. Please sync.": "Les modèles ou groupes du site principal ont changé. Veuillez synchroniser.",
+    "Model prices are fixed in USD. No exchange conversion is applied.": "Les prix des modèles sont fixés en USD, sans conversion de change."
   }
 }

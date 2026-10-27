@@ -6251,6 +6251,7 @@
     "Main site catalog changed. Fetch it again before syncing.": "主站模型目录已变化，请重新拉取后同步。",
     "Copy request parameters": "复制请求参数",
     "No saved request parameters for this task.": "此任务未保存请求参数，历史记录不补造传参。",
-    "Saved request snapshot. Credentials and file contents are omitted; large values may be shortened.": "显示已保存的请求快照：凭据与文件内容已省略，超长字段可能已截断。"
+    "Saved request snapshot. Credentials and file contents are omitted; large values may be shortened.": "显示已保存的请求快照：凭据与文件内容已省略，超长字段可能已截断。",
+    "Model prices are fixed in USD. No exchange conversion is applied.": "模型价格固定以美元（USD）计价，不进行汇率换算。"
   }
 }

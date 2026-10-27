@@ -12,12 +12,16 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
 
 func TestBranchCatalogRepeatedMultipliersUseMainPrices(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
+	originalRate := operation_setting.USDExchangeRate
+	operation_setting.USDExchangeRate = 7.3
+	t.Cleanup(func() { operation_setting.USDExchangeRate = originalRate })
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Log{}, &model.AuditLog{}))
 	model.InitOptionMap()
 	_, available := jsplugin.DefaultRegistry.Generation().Get("aicost-branch")
@@ -28,7 +32,7 @@ func TestBranchCatalogRepeatedMultipliersUseMainPrices(t *testing.T) {
 		{Pricing: model.Pricing{ModelName: "repeat-language", QuotaType: 0, ModelRatio: 2, CompletionRatio: 4, CacheRatio: &cache, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAI}}, ModelType: "language"},
 		{Pricing: model.Pricing{ModelName: "repeat-image", QuotaType: 1, ModelPrice: 0.5, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeImageGeneration}}, ModelType: "image"},
 		{Pricing: model.Pricing{ModelName: "repeat-request-video", ModelPrice: 0.8, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAIVideo}}, ModelType: "video", VideoBillingUnit: "request"},
-		{Pricing: model.Pricing{ModelName: "repeat-second-video", ModelPrice: 0.2, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAIVideo}}, ModelType: "video", VideoBillingUnit: "second"},
+		{Pricing: model.Pricing{ModelName: "repeat-second-video", ModelPrice: 0.55, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAIVideo}}, ModelType: "video", VideoBillingUnit: "second"},
 		{Pricing: model.Pricing{ModelName: "repeat-expression", BillingMode: "tiered_expr", BillingExpr: `tier("base", p * 2 + c * 8)`, SupportedEndpointTypes: []constant.EndpointType{constant.EndpointTypeOpenAI}}, ModelType: "language"},
 	}
 	names := []string{}
@@ -113,10 +117,16 @@ func TestBranchCatalogRepeatedMultipliersUseMainPrices(t *testing.T) {
 					expr := entry.Configured["billing_setting.billing_expr"].(string)
 					cost, _, err := billingexpr.RunExprWithRequest(expr, billingexpr.TokenParams{P: 1, C: 1}, billingexpr.RequestInput{Usage: map[string]any{"seconds": 5.0}})
 					require.NoError(t, err)
-					base := map[string]float64{"repeat-request-video": 0.8, "repeat-second-video": 1, "repeat-expression": 10}[entry.ModelName]
+					base := map[string]float64{"repeat-request-video": 0.8, "repeat-second-video": 2.75, "repeat-expression": 10}[entry.ModelName]
 					require.InDelta(t, base*multiplier, cost, 1e-10, "%s round=%d", entry.ModelName, round)
 					if entry.ModelName == "repeat-expression" && multiplier == 1 {
 						require.Equal(t, items[4].BillingExpr, expr, "returning to 1 must remove prior expression multipliers")
+					}
+					if entry.ModelName == "repeat-second-video" && multiplier == 1 {
+						cost, _, err := billingexpr.RunExprWithRequest(expr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: map[string]any{"seconds": 4.0}})
+						require.NoError(t, err)
+						require.InDelta(t, 2.2, cost, 1e-12, "main USD tariff must not be divided by the site exchange rate")
+						require.Equal(t, 1210000, common.QuotaRound(cost*1.1*common.QuotaPerUnit), "the explicit branch group markup remains independent of currency")
 					}
 				}
 			}

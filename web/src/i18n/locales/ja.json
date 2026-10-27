@@ -6165,6 +6165,7 @@
     "Per second": "毎秒",
     "Billing unit": "課金単位",
     "per second": "毎秒",
-    "Main site models or groups changed. Please sync.": "メインサイトのモデルまたはグループが変更されました。同期してください。"
+    "Main site models or groups changed. Please sync.": "メインサイトのモデルまたはグループが変更されました。同期してください。",
+    "Model prices are fixed in USD. No exchange conversion is applied.": "モデル価格は USD 固定です。為替換算は適用されません。"
   }
 }

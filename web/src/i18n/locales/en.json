@@ -6205,6 +6205,7 @@
     "Main site catalog changed. Fetch it again before syncing.": "Main site catalog changed. Fetch it again before syncing.",
     "Copy request parameters": "Copy request parameters",
     "No saved request parameters for this task.": "No saved request parameters for this task.",
-    "Saved request snapshot. Credentials and file contents are omitted; large values may be shortened.": "Saved request snapshot. Credentials and file contents are omitted; large values may be shortened."
+    "Saved request snapshot. Credentials and file contents are omitted; large values may be shortened.": "Saved request snapshot. Credentials and file contents are omitted; large values may be shortened.",
+    "Model prices are fixed in USD. No exchange conversion is applied.": "Model prices are fixed in USD. No exchange conversion is applied."
   }
 }

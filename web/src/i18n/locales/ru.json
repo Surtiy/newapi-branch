@@ -6165,6 +6165,7 @@
     "Per second": "В секунду",
     "Billing unit": "Единица тарификации",
     "per second": "в секунду",
-    "Main site models or groups changed. Please sync.": "Модели или группы основного сайта изменились. Выполните синхронизацию."
+    "Main site models or groups changed. Please sync.": "Модели или группы основного сайта изменились. Выполните синхронизацию.",
+    "Model prices are fixed in USD. No exchange conversion is applied.": "Цены моделей фиксированы в USD. Конвертация валют не применяется."
   }
 }

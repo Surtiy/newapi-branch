@@ -6165,6 +6165,7 @@
     "Per second": "Mỗi giây",
     "Billing unit": "Đơn vị tính phí",
     "per second": "mỗi giây",
-    "Main site models or groups changed. Please sync.": "Mô hình hoặc nhóm trên trang chính đã thay đổi. Vui lòng đồng bộ."
+    "Main site models or groups changed. Please sync.": "Mô hình hoặc nhóm trên trang chính đã thay đổi. Vui lòng đồng bộ.",
+    "Model prices are fixed in USD. No exchange conversion is applied.": "Giá mô hình cố định bằng USD. Không áp dụng quy đổi tỷ giá."
   }
 }

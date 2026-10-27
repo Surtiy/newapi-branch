@@ -6165,6 +6165,7 @@
     "Per second": "按秒",
     "Billing unit": "計費單位",
     "per second": "每秒",
-    "Main site models or groups changed. Please sync.": "主站模型或群組有變動，請及時同步"
+    "Main site models or groups changed. Please sync.": "主站模型或群組有變動，請及時同步",
+    "Model prices are fixed in USD. No exchange conversion is applied.": "模型價格固定以美元（USD）計價，不進行匯率換算。"
   }
 }

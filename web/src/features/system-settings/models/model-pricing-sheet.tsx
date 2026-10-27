@@ -59,11 +59,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  getSitePricingCurrency,
-  isValidPricingCurrency,
-  USD_PRICING_CURRENCY,
-} from '@/features/model-pricing/currency'
+import { USD_PRICING_CURRENCY } from '@/features/model-pricing/currency'
 import { PricingAmountInput } from '@/features/model-pricing/pricing-amount-input'
 import { PricingCurrencySelector } from '@/features/model-pricing/pricing-currency-selector'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
@@ -73,8 +69,6 @@ import {
 } from '@/features/pricing/lib/task-expr'
 import type { BillingUsageSchema } from '@/features/pricing/types'
 import { cn } from '@/lib/utils'
-import { usePricingPreferencesStore } from '@/stores/pricing-preferences-store'
-import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import {
   EMPTY_LANE_ENABLED,
@@ -188,16 +182,8 @@ export const ModelPricingEditorPanel = forwardRef<
   const { t } = useTranslation()
   const promptPriceId = useId()
   const formElementRef = useRef<HTMLFormElement>(null)
-  const currencyConfig = useSystemConfigStore((state) => state.config.currency)
-  const preference = usePricingPreferencesStore((state) => state.currency)
-  const siteCurrency = useMemo(
-    () => getSitePricingCurrency(currencyConfig),
-    [currencyConfig]
-  )
-  const currency =
-    preference === 'site' && isValidPricingCurrency(siteCurrency)
-      ? siteCurrency
-      : USD_PRICING_CURRENCY
+  // Model unit prices are always USD, independent of account display preferences.
+  const currency = USD_PRICING_CURRENCY
   const [pricingMode, setPricingMode] = useState<PricingMode>('per-token')
   const [promptPrice, setPromptPrice] = useState('')
   const [lanePrices, setLanePrices] = useState<Record<LaneKey, string>>({
@@ -336,9 +322,13 @@ export const ModelPricingEditorPanel = forwardRef<
 
   useEffect(() => {
     let originalMode: PricingMode = 'per-token'
-    if (editData?.billingMode === 'per-second') originalMode = 'per-second'
-    else if (editData?.billingMode === 'tiered_expr') originalMode = 'tiered_expr'
-    else if (editData?.price) originalMode = 'per-request'
+    if (editData?.billingMode === 'per-second') {
+      originalMode = 'per-second'
+    } else if (editData?.billingMode === 'tiered_expr') {
+      originalMode = 'tiered_expr'
+    } else if (editData?.price) {
+      originalMode = 'per-request'
+    }
     onDirtyChange?.(
       form.formState.isDirty ||
         pricingMode !== originalMode ||
@@ -728,7 +718,7 @@ export const ModelPricingEditorPanel = forwardRef<
                   />
                 )}
 
-                <PricingCurrencySelector siteCurrency={siteCurrency} />
+                <PricingCurrencySelector />
 
                 <Tabs
                   key={editorReloadToken}
@@ -739,16 +729,16 @@ export const ModelPricingEditorPanel = forwardRef<
                   <TabsList
                     className={cn(
                       'grid w-full',
-                      isVideoModel
-                        ? 'grid-cols-2'
-                        : supportsPerSecond
-                          ? 'grid-cols-4'
-                          : 'grid-cols-3'
+                      isVideoModel && 'grid-cols-2',
+                      !isVideoModel && supportsPerSecond && 'grid-cols-4',
+                      !isVideoModel && !supportsPerSecond && 'grid-cols-3'
                     )}
                   >
-                    {!isVideoModel && <TabsTrigger value='per-token'>
-                      {t('Per-token')}
-                    </TabsTrigger>}
+                    {!isVideoModel && (
+                      <TabsTrigger value='per-token'>
+                        {t('Per-token')}
+                      </TabsTrigger>
+                    )}
                     <TabsTrigger value='per-request'>
                       {t('Per-request')}
                     </TabsTrigger>
@@ -757,9 +747,11 @@ export const ModelPricingEditorPanel = forwardRef<
                         {t('Per-second')}
                       </TabsTrigger>
                     )}
-                    {!isVideoModel && <TabsTrigger value='tiered_expr'>
-                      {t('Expression')}
-                    </TabsTrigger>}
+                    {!isVideoModel && (
+                      <TabsTrigger value='tiered_expr'>
+                        {t('Expression')}
+                      </TabsTrigger>
+                    )}
                   </TabsList>
 
                   <TabsContent
@@ -952,32 +944,34 @@ export const ModelPricingEditorPanel = forwardRef<
                     </TabsContent>
                   )}
 
-                  {!isVideoModel && <TabsContent value='tiered_expr' className='pt-0'>
-                    <FieldGroup className='gap-5'>
-                      {taskUsageSchema ? (
-                        <TaskUsagePricingEditor
-                          currency={currency}
-                          key={`${editorReloadToken}:${watchedValues.name}`}
-                          billingExpr={resolvedBillingExpr}
-                          requestRuleExpr={requestRuleExpr}
-                          usageSchema={taskUsageSchema}
-                          usageExamples={taskUsageExamples}
-                          onBillingExprChange={setBillingExpr}
-                          onRequestRuleExprChange={setRequestRuleExpr}
-                        />
-                      ) : (
-                        <TieredPricingEditor
-                          currency={currency}
-                          key={editorReloadToken}
-                          modelName={watchedValues.name}
-                          billingExpr={billingExpr}
-                          requestRuleExpr={requestRuleExpr}
-                          onBillingExprChange={setBillingExpr}
-                          onRequestRuleExprChange={setRequestRuleExpr}
-                        />
-                      )}
-                    </FieldGroup>
-                  </TabsContent>}
+                  {!isVideoModel && (
+                    <TabsContent value='tiered_expr' className='pt-0'>
+                      <FieldGroup className='gap-5'>
+                        {taskUsageSchema ? (
+                          <TaskUsagePricingEditor
+                            currency={currency}
+                            key={`${editorReloadToken}:${watchedValues.name}`}
+                            billingExpr={resolvedBillingExpr}
+                            requestRuleExpr={requestRuleExpr}
+                            usageSchema={taskUsageSchema}
+                            usageExamples={taskUsageExamples}
+                            onBillingExprChange={setBillingExpr}
+                            onRequestRuleExprChange={setRequestRuleExpr}
+                          />
+                        ) : (
+                          <TieredPricingEditor
+                            currency={currency}
+                            key={editorReloadToken}
+                            modelName={watchedValues.name}
+                            billingExpr={billingExpr}
+                            requestRuleExpr={requestRuleExpr}
+                            onBillingExprChange={setBillingExpr}
+                            onRequestRuleExprChange={setRequestRuleExpr}
+                          />
+                        )}
+                      </FieldGroup>
+                    </TabsContent>
+                  )}
                 </Tabs>
               </FieldGroup>
 
