@@ -78,6 +78,7 @@ type drawingCapture struct {
 	quota      int
 	images     []DrawingLogImage
 	seen       map[string]bool
+	imageSlots map[string]int
 	warnings   map[string]bool
 	hook       drawingPayloadLane
 	writer     drawingWriter
@@ -95,6 +96,7 @@ type drawingPayloadLane struct {
 type drawingCandidate struct {
 	value, mime string
 	base64      bool
+	slot        string
 }
 
 type drawingWriter struct {
@@ -487,16 +489,24 @@ func (s *drawingCapture) parse(l *drawingPayloadLane, p []byte, stream bool, eve
 	}
 	final := !stream || drawingFinalEvent(typ) || drawingFinalEvent(event)
 	// Image endpoint full responses and completed image events.
-	drawingArray(r.Get("data")).ForEach(func(_, item gjson.Result) bool {
+	drawingArray(r.Get("data")).ForEach(func(index, item gjson.Result) bool {
 		if !stream || final || typ == "" {
-			s.acceptCandidate(drawingCandidate{value: item.Get("url").String()})
-			s.acceptCandidate(drawingCandidate{value: item.Get("b64_json").String(), base64: true})
+			// URL and base64 are representations of one output item, not two
+			// images. The same slot survives URL/base64 relay conversion across
+			// the upstream hook and downstream writer. Prefer a valid local copy.
+			slot := "image:" + index.String()
+			s.acceptCandidate(drawingCandidate{value: item.Get("b64_json").String(), base64: true, slot: slot})
+			s.acceptCandidate(drawingCandidate{value: item.Get("url").String(), slot: slot})
 		}
 		return true
 	})
 	if final && (strings.HasPrefix(typ, "image_generation.") || strings.HasPrefix(typ, "image_edit.") || strings.HasPrefix(event, "image_generation.") || strings.HasPrefix(event, "image_edit.")) {
-		s.acceptCandidate(drawingCandidate{value: r.Get("url").String()})
-		s.acceptCandidate(drawingCandidate{value: r.Get("b64_json").String(), base64: true})
+		slot := ""
+		if index := r.Get("image_index"); index.Exists() {
+			slot = fmt.Sprintf("image:%d", index.Int())
+		}
+		s.acceptCandidate(drawingCandidate{value: r.Get("b64_json").String(), base64: true, slot: slot})
+		s.acceptCandidate(drawingCandidate{value: r.Get("url").String(), slot: slot})
 	}
 	// Responses outputs: never recurse into input, tools, quoted JSON or arbitrary URLs.
 	output := r.Get("output")
@@ -733,7 +743,8 @@ func (s *drawingCapture) acceptCandidate(candidate drawingCandidate) {
 	if s.seen[key] {
 		return
 	}
-	if len(s.images) >= drawingMaxImages {
+	slotIndex, replacing := s.imageSlots[candidate.slot]
+	if len(s.images) >= drawingMaxImages && !replacing {
 		s.warn("image count exceeds 128")
 		return
 	}
@@ -791,7 +802,21 @@ func (s *drawingCapture) acceptCandidate(candidate drawingCandidate) {
 		result.URL = candidate.value
 	}
 	s.seen[key] = true
-	s.images = append(s.images, result)
+	if replacing {
+		// Do not downgrade a stored image to a short-lived upstream URL when
+		// the other observation lane sees the provider's representation later.
+		if result.File != "" || s.images[slotIndex].File == "" {
+			s.images[slotIndex] = result
+		}
+	} else {
+		if candidate.slot != "" {
+			if s.imageSlots == nil {
+				s.imageSlots = make(map[string]int)
+			}
+			s.imageSlots[candidate.slot] = len(s.images)
+		}
+		s.images = append(s.images, result)
+	}
 	s.intent = true
 }
 

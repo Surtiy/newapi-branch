@@ -82,6 +82,8 @@ func TestDrawingCaptureResponseShapes(t *testing.T) {
 	}{
 		{"openai-url", `{"data":[{"url":"https://images.example/p.png"}]}`, 1},
 		{"openai-base64", `{"data":[{"b64_json":"` + b64 + `"}]}`, 1},
+		{"openai-two-representations", `{"data":[{"url":"https://images.example/p.png","b64_json":"` + b64 + `"}]}`, 1},
+		{"openai-invalid-base64-url-fallback", `{"data":[{"url":"https://images.example/p.png","b64_json":"invalid"}]}`, 1},
 		{"gemini-camel", `{"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png","data":"` + b64 + `"}}]}}]}`, 1},
 		{"gemini-snake", `{"candidates":[{"content":{"parts":[{"inline_data":{"mime_type":"image/png","data":"` + b64 + `"}}]}}]}`, 1},
 		{"chat-images", `{"choices":[{"message":{"images":[{"image_url":{"url":"https://images.example/p.png"}},{"image":"data:image/png;base64,` + b64 + `"}]}}]}`, 2},
@@ -134,6 +136,38 @@ func TestDrawingCaptureResponseShapes(t *testing.T) {
 			require.NoError(t, common.UnmarshalJsonStr(rows[0].Properties, &props))
 			assert.Len(t, props.Images, tc.want)
 			assert.EqualValues(t, 1, req.calls.Load())
+		})
+	}
+}
+
+func TestDrawingCaptureImageRepresentationConversion(t *testing.T) {
+	first, _ := drawingTestPNG(t, 21)
+	second, _ := drawingTestPNG(t, 42)
+	urls := `{"data":[{"url":"https://images.example/a.png"},{"url":"https://images.example/b.png"}]}`
+	files := `{"data":[{"b64_json":"` + first + `"},{"b64_json":"` + second + `"}]}`
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("base64-upstream-%v", reverse), func(t *testing.T) {
+			db, c, writer, info := drawingTestContext(t, &dto.ImageRequest{Model: "visible-model", Prompt: "two images"})
+			upstream, downstream := urls, files
+			if reverse {
+				upstream, downstream = files, urls
+			}
+			finish := BeginDrawingCapture(c, info)
+			CaptureDrawingPayload(c, []byte(upstream))
+			c.Writer.Header().Set("Content-Type", "application/json")
+			_, err := c.Writer.WriteString(downstream)
+			require.NoError(t, err)
+			finish(nil)
+			assert.Equal(t, downstream, writer.Body.String())
+			var row model.Midjourney
+			require.NoError(t, db.First(&row).Error)
+			var props DrawingLogProperties
+			require.NoError(t, common.UnmarshalJsonStr(row.Properties, &props))
+			require.Len(t, props.Images, 2)
+			for _, product := range props.Images {
+				assert.NotEmpty(t, product.File)
+				assert.Empty(t, product.URL)
+			}
 		})
 	}
 }
