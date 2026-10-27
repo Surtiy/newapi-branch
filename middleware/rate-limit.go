@@ -193,6 +193,16 @@ func DownloadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.DownloadRateLimitNum, common.DownloadRateLimitDuration, "DW")
 }
 
+// Providers fetch image/video/audio references in bursts, often using HEAD and
+// Range before GET. Do not share the ten-download window with output downloads.
+func CanvasReferenceRateLimit() func(c *gin.Context) {
+	return rateLimitFactory(600, 60, "CR")
+}
+
+func CanvasReferenceUploadRateLimit() func(c *gin.Context) {
+	return rateLimitFactory(120, 60, "CU")
+}
+
 func UploadRateLimit() func(c *gin.Context) {
 	return rateLimitFactory(common.UploadRateLimitNum, common.UploadRateLimitDuration, "UP")
 }

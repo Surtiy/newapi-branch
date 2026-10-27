@@ -71,11 +71,11 @@ func SetRelayRouter(router *gin.Engine) {
 	relayV1Router.Use(middleware.SystemPerformanceCheck())
 	relayV1Router.Use(middleware.TokenAuth())
 	relayV1Router.Use(middleware.ModelRequestRateLimit())
-	relayV1Router.POST("/assets", middleware.UploadRateLimit(), controller.UploadCanvasAsset)
+	relayV1Router.POST("/assets", middleware.CanvasReferenceUploadRateLimit(), controller.UploadCanvasAsset)
 	// Reference URLs must work for model providers without a browser session.
 	// Only random, expiring media capabilities are public; upload still uses TokenAuth.
-	router.GET("/v1/assets/:asset", middleware.DownloadRateLimit(), controller.GetCanvasAsset)
-	router.HEAD("/v1/assets/:asset", middleware.DownloadRateLimit(), controller.GetCanvasAsset)
+	router.GET("/v1/assets/:asset", middleware.CanvasReferenceRateLimit(), controller.GetCanvasAsset)
+	router.HEAD("/v1/assets/:asset", middleware.CanvasReferenceRateLimit(), controller.GetCanvasAsset)
 	{
 		// WebSocket 路由（统一到 Relay）
 		wsRouter := relayV1Router.Group("")

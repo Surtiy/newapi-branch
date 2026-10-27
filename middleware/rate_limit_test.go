@@ -73,6 +73,26 @@ func TestRedisIPRateLimiterThresholdTTLAndNamespace(t *testing.T) {
 	assert.True(t, redisServer.Exists(legacyKey), "the v2 counter must not touch an old list key")
 }
 
+func TestCanvasReferenceRateLimitsAllowMediaBatches(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	_, _ = useRateLimitMiniRedis(t)
+	router := gin.New()
+	require.NoError(t, router.SetTrustedProxies(nil))
+	finish := func(c *gin.Context) { c.Status(http.StatusNoContent) }
+	router.GET("/reference", CanvasReferenceRateLimit(), finish)
+	router.GET("/upload", CanvasReferenceUploadRateLimit(), finish)
+	router.GET("/output", DownloadRateLimit(), finish)
+	for _, tc := range []struct {
+		path  string
+		limit int
+	}{{"/reference", 600}, {"/upload", 120}, {"/output", common.DownloadRateLimitNum}} {
+		for range tc.limit {
+			require.Equal(t, http.StatusNoContent, performRateLimitRequest(router, tc.path, "192.0.2.71:12345").Code, tc.path)
+		}
+		assert.Equal(t, http.StatusTooManyRequests, performRateLimitRequest(router, tc.path, "192.0.2.71:12345").Code)
+	}
+}
+
 func TestRedisUserRateLimiterUsesSharedFixedWindow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	redisServer, _ := useRateLimitMiniRedis(t)
