@@ -1,5 +1,9 @@
 {
   "translation": {
+    "Drawing Details": "Drawing Details",
+    "Image count: {{count}}": "Image count: {{count}}",
+    "Image {{index}}": "Image {{index}}",
+    "Filter by task or request ID": "Filter by task or request ID",
     "Consumed quota": "Consumed quota",
     "Refunded quota": "Refunded quota",
     "Refunded to subscription": "Refunded to subscription",

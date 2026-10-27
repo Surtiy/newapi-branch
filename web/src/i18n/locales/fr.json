@@ -1,5 +1,9 @@
 {
   "translation": {
+    "Drawing Details": "Détails du dessin",
+    "Image count: {{count}}": "Nombre d’images : {{count}}",
+    "Image {{index}}": "Image {{index}}",
+    "Filter by task or request ID": "Filtrer par ID de tâche ou de requête",
     "Consumed quota": "Quota consommé",
     "Refunded quota": "Quota remboursé",
     "Refunded to subscription": "Remboursé à l’abonnement",

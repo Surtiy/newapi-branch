@@ -39,6 +39,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
+import { Button } from '@/components/ui/button'
 import { formatTimestampToDate } from '@/lib/format'
 
 import { MJ_TASK_TYPES } from '../../constants'
@@ -48,8 +49,10 @@ import {
   mjSubmitResultMapper,
 } from '../../lib/mappers'
 import type { MidjourneyLog } from '../../types'
-import { ImageDialog } from '../dialogs/image-dialog'
 import { PromptDialog } from '../dialogs/prompt-dialog'
+import { DrawingDetailsCell } from '../drawing-details-cell'
+import { DrawingImagesCell } from '../drawing-images-cell'
+import { ModelBadge } from '../model-badge'
 import {
   createDurationColumn,
   createChannelColumn,
@@ -136,6 +139,17 @@ export function useDrawingLogsColumns(
   })
 
   columns.push({
+    accessorKey: 'model_name',
+    header: t('Model'),
+    cell: ({ row }) =>
+      row.original.model_name ? (
+        <ModelBadge modelName={row.original.model_name} />
+      ) : (
+        <span className='text-muted-foreground/60 text-xs'>-</span>
+      ),
+  })
+
+  columns.push({
     accessorKey: 'mj_id',
     header: t('Task ID'),
     cell: ({ row }) => {
@@ -193,36 +207,7 @@ export function useDrawingLogsColumns(
     {
       accessorKey: 'image_url',
       header: t('Image'),
-      cell: function ImageCell({ row }) {
-        const log = row.original
-        const imageUrl = row.getValue('image_url') as string
-        const [dialogOpen, setDialogOpen] = useState(false)
-
-        if (!imageUrl) {
-          return <span className='text-muted-foreground/60 text-xs'>-</span>
-        }
-
-        return (
-          <>
-            <button
-              type='button'
-              className='group text-left text-xs'
-              onClick={() => setDialogOpen(true)}
-              title={t('Click to view image')}
-            >
-              <span className='text-foreground truncate leading-snug group-hover:underline'>
-                {t('View')}
-              </span>
-            </button>
-            <ImageDialog
-              imageUrl={imageUrl}
-              taskId={log.mj_id}
-              open={dialogOpen}
-              onOpenChange={setDialogOpen}
-            />
-          </>
-        )
-      },
+      cell: ({ row }) => <DrawingImagesCell log={row.original} />,
     },
     {
       accessorKey: 'prompt',
@@ -238,8 +223,9 @@ export function useDrawingLogsColumns(
 
         return (
           <>
-            <button
-              type='button'
+            <Button
+              variant='link'
+              size='xs'
               className='group flex max-w-[220px] items-center text-left text-xs'
               onClick={() => setDialogOpen(true)}
               title={t('Click to view full prompt')}
@@ -247,7 +233,7 @@ export function useDrawingLogsColumns(
               <span className='text-muted-foreground truncate leading-snug group-hover:underline'>
                 {prompt}
               </span>
-            </button>
+            </Button>
             <PromptDialog
               prompt={prompt}
               promptEn={log.prompt_en}
@@ -259,6 +245,13 @@ export function useDrawingLogsColumns(
       },
       size: 200,
       maxSize: 220,
+    },
+    {
+      id: 'details',
+      header: t('Details'),
+      cell: ({ row }) => (
+        <DrawingDetailsCell log={row.original} isAdmin={isAdmin} />
+      ),
     },
     createFailReasonColumn<MidjourneyLog>({
       headerLabel: t('Fail Reason'),

@@ -1,5 +1,9 @@
 {
   "translation": {
+    "Drawing Details": "Детали генерации",
+    "Image count: {{count}}": "Количество изображений: {{count}}",
+    "Image {{index}}": "Изображение {{index}}",
+    "Filter by task or request ID": "Фильтр по ID задачи или запроса",
     "Consumed quota": "Израсходованная квота",
     "Refunded quota": "Возвращённая квота",
     "Refunded to subscription": "Возвращено в подписку",

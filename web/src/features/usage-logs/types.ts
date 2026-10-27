@@ -263,7 +263,7 @@ export interface LogStatistics {
 }
 
 // ============================================================================
-// Drawing Logs (MjProxy) Types
+// Drawing Logs (images and legacy MjProxy) Types
 // ============================================================================
 
 export interface MidjourneyLog {
@@ -284,6 +284,12 @@ export interface MidjourneyLog {
   buttons?: string
   properties?: string
   image_url?: string
+  model_name?: string
+  request_id?: string
+  request_path?: string
+  image_urls?: string[]
+  request_params?: Record<string, unknown>
+  quota?: number
   status: string // NOT_START, SUBMITTED, IN_PROGRESS, SUCCESS, FAILURE, MODAL
   other?: string
   created_at?: number

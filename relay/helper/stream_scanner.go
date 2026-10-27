@@ -263,6 +263,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				continue
 			}
 			if !strings.HasPrefix(data, "[DONE]") {
+				service.CaptureDrawingPayload(c, common.StringToByteSlice(data))
 				info.SetFirstResponseTime()
 				info.ReceivedResponseCount++
 

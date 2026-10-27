@@ -1,5 +1,9 @@
 {
   "translation": {
+    "Drawing Details": "Chi tiết tạo ảnh",
+    "Image count: {{count}}": "Số lượng ảnh: {{count}}",
+    "Image {{index}}": "Ảnh {{index}}",
+    "Filter by task or request ID": "Lọc theo ID tác vụ hoặc yêu cầu",
     "Consumed quota": "Hạn mức đã sử dụng",
     "Refunded quota": "Hạn mức đã hoàn",
     "Refunded to subscription": "Đã hoàn vào gói đăng ký",

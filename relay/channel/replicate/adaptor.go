@@ -285,6 +285,7 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 
 	c.Writer.Header().Set("Content-Type", "application/json")
 	c.Writer.WriteHeader(http.StatusOK)
+	service.CaptureDrawingPayload(c, responseBytes)
 	_, _ = c.Writer.Write(responseBytes)
 
 	usage := &dto.Usage{}

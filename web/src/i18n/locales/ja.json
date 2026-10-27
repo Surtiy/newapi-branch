@@ -1,5 +1,9 @@
 {
   "translation": {
+    "Drawing Details": "画像生成の詳細",
+    "Image count: {{count}}": "画像数：{{count}}",
+    "Image {{index}}": "画像 {{index}}",
+    "Filter by task or request ID": "タスクIDまたはリクエストIDで絞り込み",
     "Consumed quota": "消費クォータ",
     "Refunded quota": "返金クォータ",
     "Refunded to subscription": "サブスクリプションに返還",

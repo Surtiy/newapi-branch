@@ -1,5 +1,9 @@
 {
   "translation": {
+    "Drawing Details": "繪圖詳情",
+    "Image count: {{count}}": "圖片數量：{{count}}",
+    "Image {{index}}": "圖片 {{index}}",
+    "Filter by task or request ID": "依任務或請求 ID 篩選",
     "Consumed quota": "消費額度",
     "Refunded quota": "退款額度",
     "Refunded to subscription": "退還至訂閱",

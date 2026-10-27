@@ -209,6 +209,7 @@ function DrawingLogsCard<TData>({
 
       <div className='grid grid-cols-2 gap-1.5'>
         <SummaryField label={t('Submit Time')} cell={submitTimeCell} />
+        <SummaryField label={t('Model')} cell={cells.get('model_name')} />
         <SummaryField
           label={t('Channel')}
           cell={cells.get('channel')}
@@ -221,6 +222,7 @@ function DrawingLogsCard<TData>({
           primaryOnly
         />
         <SummaryField label={t('Image')} cell={cells.get('image_url')} />
+        <SummaryField label={t('Details')} cell={cells.get('details')} />
         <SummaryField
           label={t('Prompt')}
           cell={cells.get('prompt')}

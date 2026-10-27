@@ -42,6 +42,9 @@ func ShouldCopyUpstreamHeader(c *gin.Context, k string, v []string) bool {
 }
 
 func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
+	if src == nil || src.StatusCode >= 200 && src.StatusCode < 300 {
+		CaptureDrawingPayload(c, data)
+	}
 	if c.Writer == nil {
 		return
 	}
