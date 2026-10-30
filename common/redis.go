@@ -158,7 +158,7 @@ func RedisHSetObj(key string, obj any, expiration time.Duration) error {
 	return nil
 }
 
-func RedisHGetObj(key string, obj any) error {
+func RedisHGetObj(key string, obj any, requiredFields ...string) error {
 	if DebugEnabled {
 		SysLog(fmt.Sprintf("Redis HGETALL: key=%s", key))
 	}
@@ -171,6 +171,11 @@ func RedisHGetObj(key string, obj any) error {
 
 	if len(result) == 0 {
 		return fmt.Errorf("key %s not found in Redis", key)
+	}
+	for _, field := range requiredFields {
+		if _, exists := result[field]; !exists {
+			return fmt.Errorf("redis hash is missing required field %s", field)
+		}
 	}
 
 	// Handle both pointer and non-pointer values

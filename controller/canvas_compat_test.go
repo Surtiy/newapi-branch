@@ -18,7 +18,9 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -232,8 +234,47 @@ func TestCanvasCatalogOrdinaryTokenScopeAndBranchTariffs(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, call("/api/usage/token/model-plaza?category=unknown", token.Key).Code)
 	assert.Equal(t, http.StatusUnauthorized, call("/api/distributor/models", "").Code)
 	assert.Equal(t, http.StatusUnauthorized, call("/api/distributor/models", "badkey").Code)
+
+	// A real token can bind several groups. Exercise Redis, not just the cold
+	// database path: the catalog must not shrink to the first group on refresh.
+	redisServer := miniredis.RunT(t)
+	previousRedis, previousRDB := common.RedisEnabled, common.RDB
+	common.RDB = redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	common.RedisEnabled = true
+	t.Cleanup(func() {
+		_ = common.RDB.Close()
+		common.RedisEnabled, common.RDB = previousRedis, previousRDB
+	})
+	ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Set("default", map[string]string{"+:canvas": "canvas", "+:outside": "outside"})
+	token.Groups = model.NewTokenGroups([]string{"canvas", "outside"})
+	require.NoError(t, token.Update())
+	redisServer.FastForward(11 * time.Second)
+	for range 3 {
+		w = call("/api/distributor/models", token.Key)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.NoError(t, common.Unmarshal(w.Body.Bytes(), &envelope))
+		require.Len(t, envelope.Data.Models, 4)
+		for _, row := range envelope.Data.Models {
+			if row.ModelName == "outside-video" {
+				assert.Equal(t, []string{"outside"}, row.EnableGroup)
+			} else {
+				assert.Equal(t, []string{"canvas", "outside"}, row.EnableGroup)
+			}
+		}
+		listed = call("/v1/models", token.Key)
+		assert.Len(t, decodeListModelsPayload(t, listed).Data, 4)
+	}
+	// Removing a bound group immediately removes its models on refresh too.
+	token.Groups = model.NewTokenGroups([]string{"canvas"})
+	require.NoError(t, token.Update())
+	redisServer.FastForward(11 * time.Second)
+	w = call("/api/distributor/models", token.Key)
+	require.NoError(t, common.Unmarshal(w.Body.Bytes(), &envelope))
+	assert.Len(t, envelope.Data.Models, 3)
+	assert.NotContains(t, w.Body.String(), "outside")
 	// Exercise the actual boolean model-limit map written by TokenAuth.
-	require.NoError(t, db.Model(token).Updates(map[string]any{"model_limits_enabled": true, "model_limits": "canvas-second"}).Error)
+	token.ModelLimitsEnabled, token.ModelLimits = true, "canvas-second"
+	require.NoError(t, token.Update())
 	w = call("/api/distributor/models", token.Key)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.NoError(t, common.Unmarshal(w.Body.Bytes(), &envelope))

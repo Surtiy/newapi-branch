@@ -2,6 +2,7 @@ package model
 
 import (
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
@@ -65,4 +66,59 @@ func TestTokenUpdateSynchronouslyNarrowsPreheatedAutoGroupsCache(t *testing.T) {
 func cacheSetTokenForTest(token Token) error {
 	_, err := cacheInitToken(token)
 	return err
+}
+
+func TestTokenBoundGroupsCacheAndLegacyHydration(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	server := useUserCacheMiniRedis(t)
+	token := createReserveTestToken(t, 100)
+	token.Groups = NewTokenGroups([]string{"image", "video", "audio"})
+	token.Group = "image"
+	require.NoError(t, token.Update())
+	server.FastForward(time.Duration(tokenCacheFenceSeconds+1) * time.Second)
+
+	for range 3 {
+		loaded, err := GetTokenByKey(token.Key, false)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"image", "video", "audio"}, loaded.GetGroups())
+	}
+	// Simulate a pre-fix cache and a reservation newer than the DB snapshot.
+	require.NoError(t, common.RDB.HDel(t.Context(), getTokenCacheKey(token.Key), "Groups").Err())
+	result, err := cacheApplyTokenQuotaDelta(token.Id, token.Key, -70)
+	require.NoError(t, err)
+	require.Equal(t, cacheQuotaOK, result)
+	_, err = cacheGetTokenByKey(token.Key)
+	require.Error(t, err, "a legacy hash must fall back to the database, not one group")
+	loaded, err := GetTokenByKey(token.Key, false)
+	require.NoError(t, err)
+	assert.Equal(t, token.GetGroups(), loaded.GetGroups())
+	cached, err := cacheGetTokenByKey(token.Key)
+	require.NoError(t, err)
+	assert.Equal(t, token.GetGroups(), cached.GetGroups())
+	assert.Equal(t, 30, cached.RemainQuota, "metadata hydration must not undo pre-consumption")
+
+	// A narrowing update fences stale snapshots and removes revoked groups.
+	stale := token
+	token.Groups = NewTokenGroups([]string{"video"})
+	token.Group = "video"
+	require.NoError(t, token.Update())
+	code, err := cacheInitToken(stale)
+	require.NoError(t, err)
+	assert.Zero(t, code)
+	server.FastForward(time.Duration(tokenCacheFenceSeconds+1) * time.Second)
+	for range 3 {
+		loaded, err = GetTokenByKey(token.Key, false)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"video"}, loaded.GetGroups())
+	}
+
+	// Legacy single-group and account-inherited tokens are still valid hashes.
+	for _, group := range []string{"image", ""} {
+		single := Token{Id: 999, Key: "legacy-single-" + group, Group: group}
+		require.NoError(t, cacheSetTokenForTest(single))
+		cached, err := cacheGetTokenByKey(single.Key)
+		require.NoError(t, err)
+		assert.Equal(t, single.GetGroups(), cached.GetGroups())
+	}
 }

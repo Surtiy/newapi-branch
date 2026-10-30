@@ -50,8 +50,8 @@ func invalidateTokenCacheForMutation(key string) error {
 // cacheInitToken publishes a database snapshot only when no mutation fence is
 // active and the hash is cold. An existing hash only gets its TTL refreshed:
 // its RemainQuota may already be ahead of this snapshot because atomic
-// pre-consume decrements Redis first, so a snapshot must never overwrite any
-// field of a live hash.
+// pre-consume decrements Redis first. Only a missing Groups field from an old
+// release may be filled; existing metadata and quota fields stay untouched.
 // 返回值：0=被 fence 拦截，1=完成初始化，2=哈希已存在，仅刷新 TTL。
 func cacheInitToken(token Token) (int, error) {
 	if !common.RedisEnabled {
@@ -66,6 +66,7 @@ if redis.call('EXISTS', KEYS[2]) == 1 then
   return 0
 end
 if redis.call('EXISTS', KEYS[1]) == 1 then
+  redis.call('HSETNX', KEYS[1], 'Groups', ARGV[18])
   redis.call('EXPIRE', KEYS[1], ARGV[17])
   return 2
 end
@@ -74,7 +75,8 @@ redis.call('HSET', KEYS[1],
   'CreatedTime', ARGV[5], 'AccessedTime', ARGV[6], 'ExpiredTime', ARGV[7],
   'UnlimitedQuota', ARGV[8], 'ModelLimitsEnabled', ARGV[9], 'ModelLimits', ARGV[10],
   'AllowIps', ARGV[11], 'Group', ARGV[12], 'CrossGroupRetry', ARGV[13],
-  'AutoGroups', ARGV[14], 'RemainQuota', ARGV[15], 'UsedQuota', ARGV[16])
+  'AutoGroups', ARGV[14], 'RemainQuota', ARGV[15], 'UsedQuota', ARGV[16],
+  'Groups', ARGV[18])
 redis.call('EXPIRE', KEYS[1], ARGV[17])
 return 1`
 
@@ -87,6 +89,7 @@ return 1`
 		token.ModelLimits, allowIps, token.Group, strconv.FormatBool(token.CrossGroupRetry),
 		token.AutoGroups, token.RemainQuota, token.UsedQuota,
 		tokenCacheTTLSeconds(),
+		string(token.Groups),
 	).Int()
 }
 
@@ -96,7 +99,7 @@ func cacheGetTokenByKey(key string) (*Token, error) {
 		return nil, fmt.Errorf("redis is not enabled")
 	}
 	var token Token
-	if err := common.RedisHGetObj(getTokenCacheKey(key), &token); err != nil {
+	if err := common.RedisHGetObj(getTokenCacheKey(key), &token, "Groups"); err != nil {
 		return nil, err
 	}
 	if token.Id <= 0 {
