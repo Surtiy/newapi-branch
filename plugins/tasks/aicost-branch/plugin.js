@@ -1,5 +1,5 @@
 export const meta = {
-  apiVersion: 1, key: 'aicost-branch', name: 'AICost 主站视频', version: '1.0.5',
+  apiVersion: 1, key: 'aicost-branch', name: 'AICost 主站视频', version: '1.0.6',
   author: { name: 'AICost' }, models: ['aicost-branch-video'], fetchMode: 'per_task',
   usageSchema: { seconds: { type: 'number', unit: 'second' } },
   protocols: ['openai_video'],
@@ -141,6 +141,10 @@ export const protocols = {
       const seconds = Number(req.seconds === undefined ? req.duration : req.seconds);
       if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 3600) throw new Error('请提供有效的 seconds 视频时长');
       req.seconds = seconds;
+      // Canvas fast models send duration="auto" alongside explicit seconds.
+      // Use that validated duration consistently for host metering and relay;
+      // never guess a duration when seconds is absent or invalid.
+      if (req.duration === 'auto') req.duration = seconds;
       return { kind: 'submit', model: ctx.model, action: upscale ? 'upscale' : 'generate', requestBody: req };
     },
     render(_ctx, task) {

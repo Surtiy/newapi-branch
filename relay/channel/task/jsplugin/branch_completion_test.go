@@ -2,7 +2,9 @@ package jsplugin
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -25,6 +27,59 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestBranchCanvasAutomaticDuration(t *testing.T) {
+	source, err := os.ReadFile("../../../../plugins/tasks/aicost-branch/plugin.js")
+	require.NoError(t, err)
+	plugin, err := pluginruntime.NewRegistry().Register(string(source), pluginruntime.Options{})
+	require.NoError(t, err)
+	for _, modelName := range []string{"seedance2.0-900-fast", "seedance2.0-fast-2", "seedance2.0-v3-fast-933-720p", "seedance2.0-720p-900"} {
+		for _, kind := range []string{"json", "multipart"} {
+			t.Run(modelName+"/"+kind, func(t *testing.T) {
+				// The canvas sends duration="auto" for fast models even when
+				// seconds contains the user's explicit duration selection.
+				duration := any("auto")
+				if modelName == "seedance2.0-720p-900" {
+					duration = 7
+				}
+				body := map[string]any{"model": modelName, "prompt": "完整提示词 @图片1", "duration": duration, "seconds": "7", "resolution": "720p", "ratio": "16:9", "image_urls": []any{"https://reference.example/image.png"}}
+				wire := map[string]any{"kind": kind, "value": body}
+				if kind == "multipart" {
+					wire = map[string]any{"kind": kind, "fields": map[string]any{"model": []string{modelName}, "prompt": []string{body["prompt"].(string)}, "duration": []string{fmt.Sprint(duration)}, "seconds": []string{"7"}}}
+				}
+				resolved, err := plugin.Engine.CallPath(context.Background(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{"model": modelName, "body": wire})
+				require.NoError(t, err)
+				request, ok := resolved.(map[string]any)
+				require.True(t, ok)
+				c, _ := gin.CreateTestContext(httptest.NewRecorder())
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/videos", nil)
+				c.Request.Header.Set("Content-Type", "application/json")
+				c.Set("task_request", request["requestBody"])
+				info := &relaycommon.RelayInfo{OriginModelName: modelName, ChannelMeta: &relaycommon.ChannelMeta{ChannelBaseUrl: "https://upstream.example", ApiKey: "mock-only"}, TaskRelayInfo: &relaycommon.TaskRelayInfo{}}
+				adaptor := New(plugin)
+				adaptor.Init(info)
+				require.Nil(t, adaptor.ValidateRequestAndSetAction(c, info))
+				usage, err := adaptor.EstimateBillingValidated(c, info)
+				require.NoError(t, err)
+				assert.Equal(t, float64(7), usage["seconds"])
+				encoded, err := adaptor.BuildRequestBody(c, info)
+				require.NoError(t, err)
+				var forwarded map[string]any
+				require.NoError(t, common.DecodeJson(encoded, &forwarded))
+				assert.Equal(t, float64(7), forwarded["seconds"])
+				assert.Equal(t, modelName, forwarded["model"])
+				assert.Equal(t, body["prompt"], forwarded["prompt"])
+				if kind == "json" {
+					assert.Equal(t, body["image_urls"], forwarded["image_urls"])
+				}
+			})
+		}
+	}
+	for _, seconds := range []any{nil, "auto", "", -1, 3601, "not-a-number"} {
+		_, err := plugin.Engine.CallPath(context.Background(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{"model": "seedance2.0-900-fast", "body": map[string]any{"kind": "json", "value": map[string]any{"prompt": "test", "duration": "auto", "seconds": seconds}}})
+		require.Error(t, err, "automatic duration must not invent a billable duration for seconds=%v", seconds)
+	}
+}
 
 func TestBranchVideoSubmitsOnlyReferenceURLs(t *testing.T) {
 	source, err := os.ReadFile("../../../../plugins/tasks/aicost-branch/plugin.js")
